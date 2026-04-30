@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { type FilePath } from "../../types/Homepage";
 import { twMerge } from "tailwind-merge";
 import { FormButton, Input } from "../ui/formFields/FormFields";
+import { useI18n } from "../../i18n/I18nContext";
 
 interface InputContainerProps {
   fileModalOpen: boolean;
@@ -28,6 +29,7 @@ const InputContainer: FunctionComponent<InputContainerProps> = ({
   searchTerm,
   onSearch,
 }) => {
+  const { t } = useI18n();
   return (
     <div
       className={twMerge(
@@ -40,7 +42,7 @@ const InputContainer: FunctionComponent<InputContainerProps> = ({
           <Input
             value={searchTerm}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search for File"
+            placeholder={t.searchFile}
             className="mb-2"
           />
         ) : selectedFile ? (
@@ -61,10 +63,10 @@ const InputContainer: FunctionComponent<InputContainerProps> = ({
           <Input
             value={input}
             onChange={onInputChange}
-            placeholder="Describe task (@mention for context)"
+            placeholder={t.describeTask}
           />
         </div>
-        <FormButton onClick={onSend}>Send</FormButton>
+        <FormButton onClick={onSend}>{t.btnSend}</FormButton>
       </div>
     </div>
   );

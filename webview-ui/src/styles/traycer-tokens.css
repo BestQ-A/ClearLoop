@@ -1,0 +1,29 @@
+/* Traycer 设计 token：硬编码 hex 全部封装成 CSS 变量
+ * 来源：external/CodeSail/TRAYCER_UI_TEARDOWN.md §E (Severity / category badges, Diff viewer)
+ * 严禁用接近色或 tailwind 默认色替换。
+ */
+
+:root {
+  /* Severity / category badges（badge / comment 颜色） */
+  --traycer-color-bug: #f04438;
+  --traycer-color-performance: #17b26a;
+  --traycer-color-security: #026aa2;
+  --traycer-color-clarity: #5925dc;
+  --traycer-color-minor: #3bb3e6;
+  --traycer-color-major: #ffd60a;
+  --traycer-color-critical: #b42318;
+
+  /* Diff viewer（行级 add/del 背景） */
+  --traycer-color-diff-add: #2ea04326;
+  --traycer-color-diff-del: #f8514926;
+
+  /* Token 体系 */
+  --traycer-font-size-body: 14px;
+  --radius: 0.5rem;
+  --spacing: 0.25rem;
+}
+
+/* Body 全局 padding（Traycer 强制） */
+body {
+  padding: 0 5px !important;
+}

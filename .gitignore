@@ -7,6 +7,7 @@ out/
 dist/
 webview-ui/build/
 webview-ui/dist/
+codesail-server/target/
 
 # VS Code extension packaging
 .vscode-test/

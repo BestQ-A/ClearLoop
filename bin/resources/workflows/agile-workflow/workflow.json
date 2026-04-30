@@ -1,0 +1,18 @@
+{
+  "id": "271192ed-bf0b-4f43-9915-d77b9e7dbb04",
+  "name": "Traycer Agile Workflow",
+  "description": "A collaborative workflow for developing features from idea to specs and tickets through structured clarification.",
+  "entrypointCommand": "trigger_workflow.md",
+  "commands": [
+    "referred/epic-brief.md",
+    "referred/core-flows.md",
+    "referred/prd-validation.md",
+    "referred/tech-plan.md",
+    "referred/architecture-validation.md",
+    "referred/ticket-breakdown.md",
+    "referred/execute.md",
+    "referred/implementation-validation.md",
+    "referred/revise-requirements.md",
+    "referred/cross-artifact-validation.md"
+  ]
+}

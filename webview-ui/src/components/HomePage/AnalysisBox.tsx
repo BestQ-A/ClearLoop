@@ -3,6 +3,7 @@ import { AnalysisResponse, ThinkingStep } from "../../types/Homepage";
 import { FormButton } from "../ui/formFields/FormFields";
 import { Card, CardDescription, CardHeader, CardTitle } from "../ui/card/Card";
 import { Clipboard, Check } from "lucide-react";
+import { useI18n } from "../../i18n/I18nContext";
 
 interface AnalysisBoxProps {
   thinkingSteps: ThinkingStep[];
@@ -19,6 +20,7 @@ const AnalysisBox = ({
   onClear,
   isLoading,
 }: AnalysisBoxProps) => {
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copiedStates, setCopiedStates] = useState<boolean[]>([]);
 
@@ -76,13 +78,13 @@ const AnalysisBox = ({
     <div className="h-full bg-[var(--vscode-editor-background)] p-4 rounded-lg shadow-sm overflow-y-auto">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold text-[var(--vscode-foreground)] tracking-tight">
-          Analysis Results
+          {t.analysisResults}
         </h2>
         <FormButton
           onClick={onClear}
           className="px-4 py-2 bg-[var(--vscode-button-background)] text-[var(--vscode-button-foreground)] rounded-md hover:bg-[var(--vscode-button-hoverBackground)] transition-colors duration-200"
         >
-          Clear
+          {t.btnClear}
         </FormButton>
       </div>
       <div ref={scrollRef} className="overflow-y-auto space-y-4">
@@ -112,13 +114,13 @@ const AnalysisBox = ({
         )}
         {error && (
           <div className="p-4 bg-[var(--vscode-editorHoverWidget-background)] border-l-4 border-[var(--vscode-errorForeground)] rounded-md text-[var(--vscode-errorForeground)]">
-            <span className="font-semibold">Error:</span> {error}
+            <span className="font-semibold">{t.errorLabel}</span> {error}
           </div>
         )}
         {thinkingSteps.length > 0 && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-[var(--vscode-foreground)]">
-              Thinking Steps
+              {t.thinkingSteps}
             </h3>
             {thinkingSteps.map((step) => (
               <div
@@ -138,23 +140,23 @@ const AnalysisBox = ({
         {finalAnswer && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-[var(--vscode-foreground)]">
-              Analysis Summary
+              {t.analysisSummary}
             </h3>
             <Card className="bg-[var(--vscode-input-background)] shadow-sm hover:shadow-md transition-shadow duration-200">
               <CardHeader className="font-semibold text-[var(--vscode-foreground)]">
-                Task: {finalAnswer.task_name}
+                {t.task}: {finalAnswer.task_name}
               </CardHeader>
               <CardTitle className="px-4 pb-2 text-[var(--vscode-foreground)]">
-                <strong>PR Title:</strong> {finalAnswer.pr_title}
+                <strong>{t.prTitle}:</strong> {finalAnswer.pr_title}
               </CardTitle>
               <CardDescription className="px-4 pb-4 text-[var(--vscode-descriptionForeground)]">
-                <strong>PR Description:</strong> {finalAnswer.pr_description}
+                <strong>{t.prDescription}:</strong> {finalAnswer.pr_description}
               </CardDescription>
             </Card>
             {finalAnswer.file_changes.length > 0 && (
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-[var(--vscode-foreground)]">
-                  File Changes
+                  {t.fileChanges}
                 </h3>
                 {finalAnswer.file_changes.map((change, index) => (
                   <div
@@ -164,7 +166,7 @@ const AnalysisBox = ({
                     <div className="font-semibold text-[var(--vscode-foreground)]">
                       {change.file_status.charAt(0).toUpperCase() +
                         change.file_status.slice(1)}{" "}
-                      File: {change.file_path}
+                      {t.analysisFileLabel} {change.file_path}
                     </div>
                     {change.file_content && (
                       <div className="relative mt-2">
@@ -191,8 +193,8 @@ const AnalysisBox = ({
                           className="absolute top-2 right-2 p-2 bg-[var(--vscode-button-background)] text-[var(--vscode-button-foreground)] rounded-md hover:bg-[var(--vscode-button-hoverBackground)] transition-colors duration-200"
                           title={
                             copiedStates[index]
-                              ? "Copied!"
-                              : "Copy to Clipboard"
+                              ? t.copied
+                              : t.copyToClipboard
                           }
                         >
                           {copiedStates[index] ? (
@@ -210,7 +212,7 @@ const AnalysisBox = ({
             {finalAnswer.clarification && (
               <div className="p-4 bg-[var(--vscode-editorHoverWidget-background)] border-l-4 border-[var(--vscode-errorForeground)] rounded-md">
                 <div className="font-semibold text-[var(--vscode-errorForeground)]">
-                  Clarification Needed
+                  {t.planClarificationNeeded}
                 </div>
                 <div className="text-sm text-[var(--vscode-descriptionForeground)] mt-1">
                   {finalAnswer.clarification.message}

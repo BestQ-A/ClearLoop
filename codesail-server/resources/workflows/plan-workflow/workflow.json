@@ -1,0 +1,15 @@
+{
+  "id": "a3f1c8d2-7e45-4b9a-8c12-d9e6f0a2b5c7",
+  "name": "Traycer Plan Workflow",
+  "description": "A lightweight, general-purpose workflow for planning and developing work through structured clarification. Adapts to the nature of the request — covering product context and user experience when relevant, and technical architecture when needed.",
+  "entrypointCommand": "trigger_workflow.md",
+  "commands": [
+    "referred/plan.md",
+    "referred/plan-validation.md",
+    "referred/ticket-breakdown.md",
+    "referred/execute.md",
+    "referred/implementation-validation.md",
+    "referred/revise-requirements.md",
+    "referred/cross-artifact-validation.md"
+  ]
+}

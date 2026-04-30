@@ -2,9 +2,9 @@
   "name": "codesail",
   "displayName": "CodeSail",
   "publisher": "ws-codesail",
-  "description": "Simplified Traycer AI: A planning layer for coding agents—analyze code, generate step-by-step plans, and suggest fixes with Groq AI.",
+  "description": "Code analysis & planning layer powered by Rust backend with configurable LLM providers.",
   "version": "2.0.0",
-  "icon": "./src/icons/codesail_app.png",
+  "icon": "media/codesail_app.png",
   "keywords": [
     "AI",
     "coding agent",
@@ -24,7 +24,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:codesailView"
+    "onView:codesailView",
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -33,7 +34,7 @@
         {
           "id": "codesailSidebar",
           "title": "CodeSail",
-          "icon": "./src/icons/codesail_app.png"
+          "icon": "./media/codesail-sidebar.svg"
         }
       ]
     },
@@ -43,13 +44,74 @@
           "id": "codesailView",
           "name": "CodeSail View",
           "type": "webview",
-          "icon": "./src/icons/codesail_app.png"
+          "icon": "./media/codesail_app.png"
         }
       ]
+    },
+    "commands": [
+      { "command": "codesail.startNewTask", "title": "CodeSail: Start New Task" },
+      { "command": "codesail.openEpicView", "title": "CodeSail: Open Epic Board" },
+      { "command": "codesail.openSettings", "title": "CodeSail: Open Settings" },
+      { "command": "codesail.analyzeFile", "title": "CodeSail: Analyze Current File" },
+      { "command": "codesail.analyzeChanges", "title": "CodeSail: Analyze Changes" }
+    ],
+    "configuration": {
+      "title": "CodeSail",
+      "properties": {
+        "codesail.defaultProvider": {
+          "type": "string",
+          "default": "ollama",
+          "description": "Default LLM provider"
+        },
+        "codesail.defaultModel": {
+          "type": "string",
+          "default": "qwen3.5:9b",
+          "description": "Default model name"
+        },
+        "codesail.apiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Custom API endpoint (OpenAI-compatible)"
+        },
+        "codesail.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for remote providers"
+        },
+        "codesail.enableStreaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable streaming responses"
+        },
+        "codesail.executionAgent": {
+          "type": "string",
+          "enum": ["claude-code", "cursor", "copilot", "cline", "roo-code", "custom"],
+          "default": "claude-code",
+          "description": "Default execution agent for YOLO mode"
+        },
+        "codesail.yoloMaxRetries": {
+          "type": "number",
+          "default": 3,
+          "description": "Max verification retries in YOLO mode"
+        },
+        "codesail.outputLevel": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug"],
+          "default": "info",
+          "description": "Output log level"
+        },
+        "codesail.languagePreference": {
+          "type": "string",
+          "enum": ["en", "zh-CN", "zh-TW", "ja", "ko", "es", "fr", "de", "pt", "ru"],
+          "default": "en",
+          "description": "Language preference for AI responses"
+        }
+      }
     }
   },
   "scripts": {
-    "build": "npm run bundle:extension && npm run build-webview",
+    "build": "npm run build:rust && npm run bundle:extension && npm run build-webview",
+    "build:rust": "cd codesail-server && cargo build --release && mkdir -p ../bin && cp target/release/codesail-server.exe ../bin/ 2>/dev/null || cp target/release/codesail-server ../bin/ || true",
     "bundle:extension": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
     "compile": "tsc -p ./",
     "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --watch",
@@ -57,7 +119,7 @@
     "pretest": "npm run build && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "dev": "npm run build-webview && npm run compile"
+    "dev": "npm run build:rust && npm run build-webview && npm run compile"
   },
   "dependencies": {
     "axios": "^1.7.7",

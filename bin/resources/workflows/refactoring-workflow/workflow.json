@@ -1,0 +1,13 @@
+{
+  "id": "c4e7a1b2-3d5f-6e8a-9b0c-1d2e3f4a5b6c",
+  "name": "Traycer Refactoring Workflow",
+  "description": "A lean, collaborative workflow for systematic code refactoring - from understanding through validated implementation.",
+  "entrypointCommand": "trigger-workflow.md",
+  "commands": [
+    "referred/plan-refactor.md",
+    "referred/architecture-validation.md",
+    "referred/ticket-breakdown.md",
+    "referred/execute.md",
+    "referred/verification.md"
+  ]
+}

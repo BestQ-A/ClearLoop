@@ -3,6 +3,7 @@ import { type FilePath } from "../../types/Homepage";
 import { twMerge } from "tailwind-merge";
 import Modal from "../ui/modal/Modal";
 import { ListFiles } from "./ListFiles";
+import { useI18n } from "../../i18n/I18nContext";
 
 interface FileModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ const FileModal: FunctionComponent<FileModalProps> = ({
   onSelectFile,
   className,
 }) => {
+  const { t } = useI18n();
   return (
     <Modal
       isOpen={isOpen}
@@ -40,7 +42,7 @@ const FileModal: FunctionComponent<FileModalProps> = ({
           ))
         ) : (
           <li className="p-2 text-[var(--vscode-foreground)] opacity-70">
-            No files found.
+            {t.noFilesFound}
           </li>
         )}
       </ul>

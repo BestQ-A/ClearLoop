@@ -1,1 +1,1 @@
-{"root":["./src/global.d.ts","./src/data/menu.ts","./src/types/homepage.ts","./src/utils/vscode.ts"],"version":"5.9.3"}
+{"root":["./src/global.d.ts","./src/data/menu.ts","./src/i18n/locales/en.ts","./src/i18n/locales/index.ts","./src/i18n/locales/zh-cn.ts","./src/lib/utils.ts","./src/types/homepage.ts","./src/utils/vscode.ts"],"version":"5.9.3"}
