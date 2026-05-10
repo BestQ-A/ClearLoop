@@ -44,10 +44,8 @@ impl VerificationEngine {
         let existing_threads = self.store.get_verification_threads(&params.thread_id)?;
 
         let system_prompt = build_re_verification_system_prompt();
-        let user_prompt = build_re_verification_user_prompt(
-            &params.updated_code,
-            &existing_threads,
-        );
+        let user_prompt =
+            build_re_verification_user_prompt(&params.updated_code, &existing_threads);
 
         let raw = provider.chat(&system_prompt, &user_prompt).await?;
 
@@ -220,7 +218,8 @@ fn parse_verification_response(raw: &str, plan_id: &str) -> Result<VerifyResult,
                 severity: Severity::Critical,
                 category: ReviewCategory::Bug,
                 referred_files: vec![],
-                prompt_for_ai_agent: "验证系统返回了无法解析的结果，请检查 LLM 提示词或手动审查。".into(),
+                prompt_for_ai_agent: "验证系统返回了无法解析的结果，请检查 LLM 提示词或手动审查。"
+                    .into(),
                 is_applied: false,
                 created_at: now.clone(),
             }],
@@ -266,15 +265,11 @@ mod tests {
 
     #[test]
     fn test_parse_verification_response_invalid_returns_fallback() {
-        let result =
-            parse_verification_response("this is not json at all", "p-3").unwrap();
+        let result = parse_verification_response("this is not json at all", "p-3").unwrap();
         assert!(!result.overall_passed);
         assert_eq!(result.overall_score, 0.0);
         assert!(!result.threads.is_empty());
-        assert_eq!(
-            result.threads[0].comments[0].severity,
-            Severity::Critical
-        );
+        assert_eq!(result.threads[0].comments[0].severity, Severity::Critical);
     }
 
     #[test]

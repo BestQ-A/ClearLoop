@@ -113,7 +113,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn chat(&self, system: &str, user: &str) -> Result<String, String> {
-        let url = format!("{}/v1/chat/completions", self.config.endpoint);
+        let url = build_chat_url(&self.config.endpoint);
         let body = ChatRequest {
             model: self.config.model.clone(),
             messages: Self::build_messages(system, user),
@@ -154,7 +154,7 @@ impl LlmProvider for OpenAiProvider {
         user: &str,
         sender: tokio::sync::mpsc::Sender<StreamChunk>,
     ) -> Result<String, String> {
-        let url = format!("{}/v1/chat/completions", self.config.endpoint);
+        let url = build_chat_url(&self.config.endpoint);
         let body = ChatRequest {
             model: self.config.model.clone(),
             messages: Self::build_messages(system, user),
@@ -182,8 +182,8 @@ impl LlmProvider for OpenAiProvider {
         let mut line_buffer = String::new();
 
         while let Some(chunk_result) = byte_stream.next().await {
-            let chunk_bytes = chunk_result
-                .map_err(|e| format!("OpenAI stream read error: {}", e))?;
+            let chunk_bytes =
+                chunk_result.map_err(|e| format!("OpenAI stream read error: {}", e))?;
 
             let chunk_text = String::from_utf8_lossy(&chunk_bytes);
             line_buffer.push_str(&chunk_text);
@@ -274,5 +274,59 @@ impl LlmProvider for OpenAiProvider {
             .await;
 
         Ok(full_response)
+    }
+}
+
+/// 用户配的 endpoint 风格各异，统一拼成 `<base>/chat/completions`：
+/// - `https://api.openai.com`        → `https://api.openai.com/v1/chat/completions`
+/// - `https://api.openai.com/v1`     → `https://api.openai.com/v1/chat/completions`
+/// - `https://api.z.ai/api/paas/v4`  → `https://api.z.ai/api/paas/v4/chat/completions`
+/// - 末尾已带 `/chat/completions`     → 原样返回
+fn build_chat_url(endpoint: &str) -> String {
+    let trimmed = endpoint.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        return trimmed.to_string();
+    }
+    // endpoint 已经包含版本号段（/v1 /v2 ... /v9 或 /paas/v\d+），直接拼 /chat/completions
+    let has_version_segment = trimmed
+        .rsplit('/')
+        .next()
+        .map(|seg| {
+            seg.starts_with('v') && seg.len() >= 2 && seg[1..].chars().all(|c| c.is_ascii_digit())
+        })
+        .unwrap_or(false);
+    if has_version_segment {
+        format!("{}/chat/completions", trimmed)
+    } else {
+        format!("{}/v1/chat/completions", trimmed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_chat_url;
+
+    #[test]
+    fn build_chat_url_variants() {
+        assert_eq!(
+            build_chat_url("https://api.openai.com"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_chat_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_chat_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_chat_url("https://api.z.ai/api/paas/v4"),
+            "https://api.z.ai/api/paas/v4/chat/completions"
+        );
+        assert_eq!(
+            build_chat_url("https://api.z.ai/api/paas/v4/chat/completions"),
+            "https://api.z.ai/api/paas/v4/chat/completions"
+        );
     }
 }

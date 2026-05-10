@@ -53,6 +53,10 @@ pub struct StepFrontmatter {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NextStep {
     pub name: String,
+    /// 可选，frontmatter 里如果给了 `description: "..."` 就带上；
+    /// 现网 .md 模板里大多只写 name，因此该字段可缺省。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// 单个 step 的完整定义（manifest + frontmatter + body）。
@@ -85,9 +89,7 @@ impl WorkflowTemplate {
         if self.entrypoint.command_name == trimmed {
             return Some(&self.entrypoint);
         }
-        self.commands
-            .iter()
-            .find(|s| s.command_name == trimmed)
+        self.commands.iter().find(|s| s.command_name == trimmed)
     }
 }
 
@@ -250,11 +252,7 @@ pub fn template_to_workflow_info(t: &WorkflowTemplate) -> crate::protocol::Workf
                 .name
                 .clone()
                 .unwrap_or_else(|| s.command_name.replace(['-', '_'], " ")),
-            description: s
-                .frontmatter
-                .description
-                .clone()
-                .unwrap_or_default(),
+            description: s.frontmatter.description.clone().unwrap_or_default(),
             status: crate::protocol::StepStatus::Pending,
         });
     };

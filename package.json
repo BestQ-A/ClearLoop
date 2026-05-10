@@ -1,21 +1,25 @@
 {
-  "name": "codesail",
-  "displayName": "CodeSail",
-  "publisher": "ws-codesail",
-  "description": "Code analysis & planning layer powered by Rust backend with configurable LLM providers.",
-  "version": "2.0.0",
+  "name": "clearloop",
+  "displayName": "ClearLoop",
+  "publisher": "bestqa",
+  "description": "Clear AI control plane for turning agent relevance into explicit causal plans, evidence, verification, and reusable memory.",
+  "version": "2.0.6",
+  "license": "Apache-2.0",
   "icon": "media/codesail_app.png",
   "keywords": [
     "AI",
     "coding agent",
+    "clear ai",
+    "causal planning",
     "planning layer",
+    "agent orchestration",
     "code analysis",
     "reverse engineering",
-    "Traycer"
+    "verification"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/whoshriyansh/CodeSail"
+    "url": "https://github.com/BestQ-A/ClearLoop.git"
   },
   "engines": {
     "vscode": "^1.93.0"
@@ -24,7 +28,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:codesailView",
+    "*",
+    "onView:clearLoop.commentNavigatorWebview",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
@@ -32,86 +37,117 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "codesailSidebar",
-          "title": "CodeSail",
+          "id": "clearLoopNavigator",
+          "title": "ClearLoop",
           "icon": "./media/codesail-sidebar.svg"
         }
       ]
     },
     "views": {
-      "codesailSidebar": [
+      "clearLoopNavigator": [
         {
-          "id": "codesailView",
-          "name": "CodeSail View",
+          "id": "clearLoop.commentNavigatorWebview",
+          "name": "ClearLoop",
           "type": "webview",
           "icon": "./media/codesail_app.png"
         }
       ]
     },
     "commands": [
-      { "command": "codesail.startNewTask", "title": "CodeSail: Start New Task" },
-      { "command": "codesail.openEpicView", "title": "CodeSail: Open Epic Board" },
-      { "command": "codesail.openSettings", "title": "CodeSail: Open Settings" },
-      { "command": "codesail.analyzeFile", "title": "CodeSail: Analyze Current File" },
-      { "command": "codesail.analyzeChanges", "title": "CodeSail: Analyze Changes" }
+      { "command": "clearLoop.startNewTask", "title": "ClearLoop: Start New Task" },
+      { "command": "clearLoop.openTaskHistory", "title": "ClearLoop: Open Task History" },
+      { "command": "clearLoop.listMCPServers", "title": "ClearLoop: List MCP Servers" },
+      { "command": "clearLoop.managePromptTemplates", "title": "ClearLoop: Manage Prompt Templates" },
+      { "command": "clearLoop.manageCLIAgents", "title": "ClearLoop: Manage CLI Agents" },
+      { "command": "clearLoop.manageWorkflows", "title": "ClearLoop: Manage Workflows" },
+      { "command": "clearLoop.manageGitScripts", "title": "ClearLoop: Manage Git Scripts" },
+      { "command": "clearLoop.manageModelProfiles", "title": "ClearLoop: Manage Model Profiles" },
+      { "command": "clearLoop.openEpicView", "title": "ClearLoop: Open Epic View" },
+      { "command": "clearLoop.openSettings", "title": "ClearLoop: Open Settings" },
+      { "command": "clearLoop.analyzeFile", "title": "ClearLoop: Analyze Current File" },
+      { "command": "clearLoop.analyzeChanges", "title": "ClearLoop: Analyze Changes" },
+      { "command": "clearLoop.createCliHandoff", "title": "ClearLoop: Create CLI Agent Handoff Smoke" },
+      { "command": "clearLoop.codexLogin", "title": "ClearLoop: Codex Login" },
+      { "command": "clearLoop.codexStatus", "title": "ClearLoop: Codex Login Status" }
     ],
     "configuration": {
-      "title": "CodeSail",
+      "title": "ClearLoop",
       "properties": {
-        "codesail.defaultProvider": {
+        "clearLoop.defaultProvider": {
           "type": "string",
           "default": "ollama",
           "description": "Default LLM provider"
         },
-        "codesail.defaultModel": {
+        "clearLoop.defaultModel": {
           "type": "string",
           "default": "qwen3.5:9b",
           "description": "Default model name"
         },
-        "codesail.apiEndpoint": {
+        "clearLoop.apiEndpoint": {
           "type": "string",
           "default": "",
           "description": "Custom API endpoint (OpenAI-compatible)"
         },
-        "codesail.apiKey": {
+        "clearLoop.apiKey": {
           "type": "string",
           "default": "",
           "description": "API key for remote providers"
         },
-        "codesail.enableStreaming": {
+        "clearLoop.enableStreaming": {
           "type": "boolean",
           "default": true,
           "description": "Enable streaming responses"
         },
-        "codesail.executionAgent": {
+        "clearLoop.executionAgent": {
           "type": "string",
-          "enum": ["claude-code", "cursor", "copilot", "cline", "roo-code", "custom"],
+          "enum": ["claude-code", "codex-cli", "codex", "cursor", "copilot", "cline", "roo-code", "custom"],
           "default": "claude-code",
           "description": "Default execution agent for YOLO mode"
         },
-        "codesail.yoloMaxRetries": {
+        "clearLoop.yoloMaxRetries": {
           "type": "number",
           "default": 3,
           "description": "Max verification retries in YOLO mode"
         },
-        "codesail.outputLevel": {
+        "clearLoop.outputLevel": {
           "type": "string",
           "enum": ["error", "warn", "info", "debug"],
           "default": "info",
           "description": "Output log level"
         },
-        "codesail.languagePreference": {
+        "clearLoop.languagePreference": {
           "type": "string",
           "enum": ["en", "zh-CN", "zh-TW", "ja", "ko", "es", "fr", "de", "pt", "ru"],
           "default": "en",
           "description": "Language preference for AI responses"
+        },
+        "clearLoop.enablePromptTemplateSelector": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show prompt template selector entries in ClearLoop settings."
+        },
+        "clearLoop.additionalAgents": {
+          "type": "array",
+          "default": [],
+          "description": "Additional custom CLI agents exposed in ClearLoop."
+        },
+        "clearLoop.sendKey": {
+          "type": "string",
+          "default": "enter",
+          "description": "Key behavior for sending prompts from the ClearLoop composer."
+        },
+        "clearLoop.enableAgentsMd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow ClearLoop to use AGENTS.md guidance when preparing tasks."
         }
       }
     }
   },
   "scripts": {
-    "build": "npm run build:rust && npm run bundle:extension && npm run build-webview",
-    "build:rust": "cd codesail-server && cargo build --release && mkdir -p ../bin && cp target/release/codesail-server.exe ../bin/ 2>/dev/null || cp target/release/codesail-server ../bin/ || true",
+    "vscode:prepublish": "npm run build",
+    "build": "npm run build:rust && npm run compile && npm run bundle:extension && npm run build-webview",
+    "build:rust": "cd codesail-server && cargo build --release && node -e \"const fs=require('fs');const path=require('path');fs.mkdirSync('../bin',{recursive:true});const exe=process.platform==='win32'?'codesail-server.exe':'codesail-server';fs.copyFileSync(path.join('target','release',exe),path.join('..','bin',exe));\"",
     "bundle:extension": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --sourcemap",
     "compile": "tsc -p ./",
     "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=es2020 --watch",
@@ -119,7 +155,7 @@
     "pretest": "npm run build && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "dev": "npm run build:rust && npm run build-webview && npm run compile"
+    "dev": "npm run build:rust && npm run compile && npm run bundle:extension && npm run build-webview"
   },
   "dependencies": {
     "axios": "^1.7.7",

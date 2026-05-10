@@ -6,6 +6,7 @@
 
 use std::sync::OnceLock;
 
+use crate::protocol::epic_chat::NextStepOption;
 use crate::protocol::*;
 
 use super::loader::{self, WorkflowTemplate};
@@ -114,6 +115,46 @@ pub fn validation_system_prompt(wf: &WorkflowType) -> String {
         .map(|s| s.body.clone())
         .unwrap_or_else(|| FALLBACK_VALIDATION_PROMPT.to_string())
 }
+
+/// 通用 step prompt 查询：按 step 名（命令名）找 `referred/<step>.md` 的 markdown body。
+///
+/// 与 `plan_system_prompt` / `validation_system_prompt` 的差别：后两者按
+/// workflow 类型映射"主 plan / validation step"，本函数按 step 名直查
+/// （含 entrypoint），用于 Epic Chat 的多步对话——任意 step 都能拿到自身 prompt。
+///
+/// 找不到时回退到 `FALLBACK_STEP_PROMPT`，保证调用链不会传空 prompt。
+pub fn step_prompt(wf: &WorkflowType, step: &str) -> String {
+    template_for(wf)
+        .and_then(|t| t.find_step(step))
+        .map(|s| s.body.clone())
+        .unwrap_or_else(|| FALLBACK_STEP_PROMPT.to_string())
+}
+
+/// 通用 step nextSteps 查询：解析该 step .md 的 frontmatter `nextSteps` 列表，
+/// 投影成对外的 `NextStepOption`（带可选 description）。
+pub fn step_next_steps(wf: &WorkflowType, step: &str) -> Vec<NextStepOption> {
+    template_for(wf)
+        .and_then(|t| t.find_step(step))
+        .map(|s| {
+            s.frontmatter
+                .next_steps
+                .iter()
+                .map(|ns| NextStepOption {
+                    name: ns.name.clone(),
+                    description: ns.description.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 兜底 step prompt——告诉 LLM 自由用 markdown 回应，不要求 JSON。
+///
+/// 与 plan / validation 兜底不同：Epic Chat 是真正的多轮 markdown 对话，
+/// LLM 输出整段 markdown（含 heading / 列表 / 代码块），server 不再 parse_json。
+static FALLBACK_STEP_PROMPT: &str = r#"You are a senior software engineer collaborating in a multi-turn workflow.
+
+Reply in clear, well-structured Markdown directly addressing the user's prompt. Use headings, bullet lists, and code blocks where they aid clarity. Do NOT wrap your output in a JSON envelope; the host system reads your raw Markdown."#;
 
 /// 兜底 prompt（仅在 .md 文件丢失时使用），保留最小 JSON 输出契约，供 main.rs 的 `parse_json` 仍然能解出 `PlanResult`。
 static FALLBACK_PLAN_PROMPT: &str = r#"You are an expert software engineer acting as a planning layer for coding agents.

@@ -176,8 +176,8 @@ impl LlmProvider for OllamaProvider {
         let mut line_buffer = String::new();
 
         while let Some(chunk_result) = byte_stream.next().await {
-            let chunk_bytes = chunk_result
-                .map_err(|e| format!("Ollama stream read error: {}", e))?;
+            let chunk_bytes =
+                chunk_result.map_err(|e| format!("Ollama stream read error: {}", e))?;
 
             let chunk_text = String::from_utf8_lossy(&chunk_bytes);
             line_buffer.push_str(&chunk_text);

@@ -1,5 +1,7 @@
 import type { WorkflowType } from "../../types/Homepage";
 import { useI18n } from "../../i18n/I18nContext";
+import TraycerLogoIcon from "../Brand/TraycerLogoIcon";
+import { CircleCheck } from "lucide-react";
 
 /**
  * Traycer "What can I help you build today?" 4 卡片选择器。
@@ -27,6 +29,7 @@ interface CardSpec {
   workflow: WorkflowType;
   /** 入口 step（启动哪个命令） */
   entryStep?: string;
+  badge?: string;
 }
 
 type Translations = ReturnType<typeof useI18n>["t"];
@@ -67,35 +70,14 @@ interface Props {
   activeEntryStep?: string;
 }
 
-/** 内联 CircleCheck（lucide-style，size-4） */
-const CircleCheck = ({ className = "" }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    aria-hidden="true"
-  >
-    <circle cx="12" cy="12" r="10" />
-    <path d="m9 12 2 2 4-4" />
-  </svg>
-);
-
 const WorkflowSelector = ({ active, onSelect, activeEntryStep }: Props) => {
   const { t } = useI18n();
   const cards = makeCards(t);
   return (
     <div className="flex flex-col items-center gap-2 px-4 pt-6 pb-4">
-      {/* Logo placeholder（Traycer 这里挂 TraycerLogoIcon 340x340 mask SVG，CodeSail 不抄 logo） */}
+      <TraycerLogoIcon className="self-center text-[var(--traycer-logo-color)]" />
 
-      {/* 标题 + 副标题 */}
-      <div className="mb-8 flex flex-col items-center gap-2">
+      <div className="mb-8 mt-2 flex flex-col items-center gap-2">
         <span className="font-heading text-pretty text-center text-[var(--vscode-foreground)] text-xl font-semibold">
           {t.landingTitle}
         </span>
@@ -105,7 +87,7 @@ const WorkflowSelector = ({ active, onSelect, activeEntryStep }: Props) => {
       </div>
 
       {/* 4 卡片 grid 2x2 */}
-      <div className="grid grid-cols-2 gap-2 w-full">
+      <div className="grid grid-cols-2 w-full justify-center border-border rounded-lg gap-2">
         {cards.map((card) => {
           const isSelected =
             card.workflow === active &&
@@ -116,20 +98,24 @@ const WorkflowSelector = ({ active, onSelect, activeEntryStep }: Props) => {
               key={card.title}
               onClick={() => onSelect(card.workflow, card.entryStep)}
               className={[
-                "relative text-left p-4 rounded-md border transition-colors cursor-pointer",
+                "relative p-4 flex flex-col gap-y-1 cursor-pointer transition-colors w-full text-center items-center h-full border-border border rounded-md bg-transparent",
                 isSelected
-                  ? "border-[var(--vscode-focusBorder)] bg-[var(--vscode-input-background)]"
-                  : "border-[var(--vscode-panel-border)] bg-[var(--vscode-editor-background)] hover:border-[var(--vscode-focusBorder)]",
+                  ? "bg-[var(--vscode-input-background)] text-[var(--vscode-input-foreground)]"
+                  : "hover:bg-[var(--vscode-list-hoverBackground)]",
               ].join(" ")}
             >
-              {/* 标题行：title + 右上角 CircleCheck（激活时） + Free 徽章 */}
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex w-full items-center justify-center mb-1.5">
                 <span className="text-sm font-semibold text-[var(--vscode-foreground)]">
                   {card.title}
                 </span>
-                <div className="flex items-center gap-1">
-                  {isSelected && <CircleCheck className="text-green-500 size-4" />}
-                </div>
+                {isSelected && (
+                  <CircleCheck className="absolute right-3 top-3 text-green-500 size-4" />
+                )}
+                {card.badge && !isSelected && (
+                  <span className="absolute right-3 top-3 rounded-full border border-[var(--vscode-panel-border)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--vscode-testing-iconPassed,#73c991)]">
+                    {card.badge}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-[var(--vscode-descriptionForeground)] leading-relaxed">
                 {card.desc}

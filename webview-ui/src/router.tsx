@@ -5,6 +5,7 @@ import TaskView from "./routes/task/TaskView";
 import InterviewView from "./routes/task/InterviewView";
 import KanbanView from "./routes/task/KanbanView";
 import LoadingView from "./routes/task/LoadingView";
+import ChatView from "./routes/task/ChatView";
 import HistoryView from "./routes/HistoryView";
 import EpicChatView from "./routes/EpicChatView";
 import McpView from "./routes/McpView";
@@ -29,6 +30,7 @@ export const router = createMemoryRouter([
       { path: "task/interview/:taskChainId", element: <InterviewView /> },
       { path: "task/kanban/:taskChainId/:phaseBreakdownId", element: <KanbanView /> },
       { path: "task/loading/:taskChainId", element: <LoadingView /> },
+      { path: "task/chat", element: <ChatView /> },
       { path: "history", element: <HistoryView /> },
       { path: "epic/chat/:epicId", element: <EpicChatView /> },
       { path: "mcp", element: <McpView /> },

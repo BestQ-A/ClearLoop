@@ -1,7 +1,7 @@
+pub mod loader;
 pub mod prompt;
 pub mod workflow;
-pub mod loader;
 
-pub use prompt::{system_prompt, user_prompt, build_analysis_prompt};
-pub use workflow::{get_workflow, get_all_workflows};
-pub use loader::{WorkflowTemplate, load_workflows};
+pub use loader::{load_workflows, WorkflowTemplate};
+pub use prompt::{build_analysis_prompt, system_prompt, user_prompt};
+pub use workflow::{get_all_workflows, get_workflow};

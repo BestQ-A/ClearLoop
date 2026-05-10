@@ -6,9 +6,9 @@ import { getVsCodeApi } from "../../utils/vscode";
  *
  * 行为：
  * 1. 点击切换 locale（webview 内立即生效）
- * 2. 同时通过 vscode.postMessage 发 codesail-locale-set 给扩展，
- *    扩展会写回 VS Code setting `codesail.languagePreference`。
- *    设置变更后 ViewProvider 监听到，再 push 一条 codesail-locale 回所有 webview，
+ * 2. 同时通过 vscode.postMessage 发 clearLoop-locale-set 给扩展，
+ *    扩展会写回 VS Code setting `clearLoop.languagePreference`。
+ *    设置变更后 ViewProvider 监听到，再 push 一条 clearLoop-locale 回所有 webview，
  *    保证下次启动 / 多 webview 一致。
  */
 export function LanguageSwitcher() {
@@ -22,7 +22,7 @@ export function LanguageSwitcher() {
     setLocale(next);
     try {
       const api = getVsCodeApi();
-      api.postMessage({ command: "codesail-locale-set", data: next });
+      api.postMessage({ command: "clearLoop-locale-set", data: next });
     } catch (e) {
       console.warn("[LanguageSwitcher] postMessage failed:", e);
     }

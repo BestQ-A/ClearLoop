@@ -5,16 +5,15 @@ import EditableTitleViewer from "./EditableTitleViewer";
 import NotificationBellButton from "./NotificationBellButton";
 import OpenBoardBadgeButton from "./OpenBoardBadgeButton";
 import SharePopover from "./SharePopover";
-import LanguageSwitcher from "./LanguageSwitcher";
 import { usePageTitle } from "./usePageTitle";
 import { useI18n } from "../../i18n/I18nContext";
 
 /**
  * Traycer commentNavigator 顶部 toolbar 1:1 复刻。
- * 见 external/CodeSail/TRAYCER_UI_TEARDOWN.md A 节
- * 与 external/CodeSail/TRAYCER_VS_CODESAIL_GAPS.md 第 1 节。
+ * Legacy UI reference: TRAYCER_UI_TEARDOWN.md section A.
+ * Keep the public ClearLoop word-mark out of this compact toolbar.
  *
- * 严禁出现 "CODESAIL" / "Traycer" word-mark：
+ * 严禁出现产品 word-mark：
  * 容器里只有 Back/Forward + EditableTitle + 右侧 IconButton 组。
  *
  * className 串严格 verbatim：
@@ -108,7 +107,6 @@ export function NavigationBar({
       <div className="ml-auto flex shrink-0 items-center gap-2 pr-1">
         {isEpicChat && <OpenBoardBadgeButton onClick={onOpenBoard} />}
         {isEpicChat && <SharePopover />}
-        <LanguageSwitcher />
         <NotificationBellButton
           unreadCount={unreadCount}
           ariaLabel={t.navNotifications}

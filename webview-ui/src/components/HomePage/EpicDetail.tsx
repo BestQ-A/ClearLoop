@@ -27,9 +27,10 @@ interface Props {
   epic: Epic;
   onBack: () => void;
   sendToExtension: (cmd: string, data?: unknown) => void;
+  embedded?: boolean;
 }
 
-export default function EpicDetail({ epic, onBack, sendToExtension }: Props) {
+export default function EpicDetail({ epic, onBack, sendToExtension, embedded = false }: Props) {
   const { t } = useI18n();
   const [selected, setSelected] = useState<{
     kind: ArtifactKind;
@@ -37,7 +38,9 @@ export default function EpicDetail({ epic, onBack, sendToExtension }: Props) {
   } | null>(null);
 
   const handleHandoff = () => {
-    sendToExtension("startExecution", { epic_id: epic.id });
+    const ticketId = selected?.kind === "ticket" ? selected.id : epic.tickets[0]?.id;
+    if (!ticketId) return;
+    sendToExtension("startExecution", { epic_id: epic.id, ticket_id: ticketId });
   };
   const handleVerify = () => {
     sendToExtension("verifyEpic", { epic_id: epic.id });
@@ -113,65 +116,65 @@ export default function EpicDetail({ epic, onBack, sendToExtension }: Props) {
 
   return (
     <div className="h-full flex flex-col relative">
-      {/* Header（fixed top, z-50） */}
-      <div className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--vscode-panel-border)] py-1.5 px-4 flex items-center gap-2 w-full justify-between min-h-10 bg-[var(--vscode-editor-background)]">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onBack}
-          className="rounded-md size-7"
-          aria-label={t.commonBack}
-        >
-          <ChevronLeft className="size-4" />
-        </Button>
-        <span className="font-semibold truncate first-letter:capitalize flex-1 ml-2">
-          {epic.title}
-        </span>
-        {/* 工具区：Share / Open Chat / History / Bell —— NAV agent 后续填具体行为 */}
-        <div className="ml-auto flex items-center gap-2">
+      {!embedded && (
+        <div className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--vscode-panel-border)] py-1.5 px-4 flex items-center gap-2 w-full justify-between min-h-10 bg-[var(--vscode-editor-background)]">
           <Button
             variant="outline"
             size="icon"
+            onClick={onBack}
             className="rounded-md size-7"
-            aria-label={t.navShare}
-            onClick={() => sendToExtension("shareEpic", { epic_id: epic.id })}
+            aria-label={t.commonBack}
           >
-            <Share2 className="size-4" />
+            <ChevronLeft className="size-4" />
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-md gap-1.5"
-            onClick={() => sendToExtension("openEpicChat", { epic_id: epic.id })}
-          >
-            <MessageSquare className="size-3.5" />
-            <span className="text-sm">{t.epicOpenChat}</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="rounded-md size-7"
-            aria-label={t.navHistory}
-            onClick={() => sendToExtension("openHistory")}
-          >
-            <History className="size-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="rounded-md size-7"
-            aria-label={t.navNotifications}
-            onClick={() => sendToExtension("openNotifications")}
-          >
-            <Bell className="size-4" />
-          </Button>
+          <span className="font-semibold truncate first-letter:capitalize flex-1 ml-2">
+            {epic.title}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-md size-7"
+              aria-label={t.navShare}
+              onClick={() => sendToExtension("shareEpic", { epic_id: epic.id })}
+            >
+              <Share2 className="size-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-md gap-1.5"
+              onClick={() => sendToExtension("openEpicChat", { epic_id: epic.id })}
+            >
+              <MessageSquare className="size-3.5" />
+              <span className="text-sm">{t.epicOpenChat}</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-md size-7"
+              aria-label={t.navHistory}
+              onClick={() => sendToExtension("openHistory")}
+            >
+              <History className="size-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-md size-7"
+              aria-label={t.navNotifications}
+              onClick={() => sendToExtension("openNotifications")}
+            >
+              <Bell className="size-4" />
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 主体：左 80% + 右 20% */}
       <div
         className="flex-1 overflow-hidden relative"
-        style={{ marginTop: "2.5rem" }}
+        style={{ marginTop: embedded ? 0 : "2.5rem" }}
       >
         <ResizablePanelGroup
           direction="horizontal"

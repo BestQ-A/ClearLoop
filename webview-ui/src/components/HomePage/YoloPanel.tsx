@@ -11,7 +11,7 @@ interface Props {
 }
 
 const agentOptions = [
-  "claude-code", "cursor", "copilot", "cline", "roo-code",
+  "claude-code", "codex-cli", "cursor", "copilot", "cline", "roo-code",
   "augment", "zencoder", "amp", "windsurf",
 ];
 

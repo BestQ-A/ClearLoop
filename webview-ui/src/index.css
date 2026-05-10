@@ -5,21 +5,44 @@
   --input-padding-horizontal: 4px;
   --input-margin-vertical: 4px;
   --input-margin-horizontal: 0;
+  --traycer-toolbar-height: 50px;
+  --traycer-input-box-height: 30px;
+  --traycer-search-input-height: 34px;
+  --intentional-margin: 0px;
+  --border: var(--color-border, #0000001a);
+  --traycer-logo-color: #333333;
 }
 
 body,
 html {
-  padding: 0 var(--container-padding);
+  margin: 0;
+  padding: 0 5px !important;
   color: var(--vscode-foreground);
   font-size: var(--vscode-font-size);
   font-weight: var(--vscode-font-weight);
   font-family: var(--vscode-font-family);
-  background-color: var(--vscode-sidebar);
+  line-height: inherit;
+  background-color: var(--vscode-editor-background);
+}
+
+body.vscode-dark {
+  --color-border: #ffffff1a;
+  --traycer-logo-color: #eeeeee;
+}
+
+body.vscode-light {
+  --color-border: #0000001a;
+  --traycer-logo-color: #333333;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
 }
 
 ol,
 ul {
-  padding-left: var(--container-padding);
+  padding-left: 0;
 }
 
 code {
@@ -36,27 +59,14 @@ a:active {
   color: var(--vscode-textLink-activeForeground);
 }
 
-button {
-  border: none;
-  padding: var(--input-padding-vertical) var(--input-padding-horizontal);
-  text-align: center;
-  outline: 1px solid transparent;
-  outline-offset: 2px !important;
-  color: var(--vscode-button-foreground);
-  background: var(--vscode-button-background);
-}
-
-button:hover {
-  cursor: pointer;
-  background: var(--vscode-button-hoverBackground);
-}
-
-button:focus {
+button:focus-visible {
   outline-color: var(--vscode-focusBorder);
 }
 
 input {
-  border: 1px solid var(--vscode-input-foreground);
+  border: 1px solid var(--border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
 }
 
 textarea {
@@ -72,6 +82,36 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+.border-border {
+  border-color: var(--border) !important;
+}
+
+.text-text-primary {
+  color: var(--vscode-foreground);
+}
+
+.text-textSecondary,
+.text-text-secondary {
+  color: var(--vscode-descriptionForeground);
+}
+
+.font-heading {
+  font-family: var(--vscode-font-family);
+}
+
+.tiptap-editor p {
+  margin: 0;
+}
+
+.tiptap-editor .is-empty::before {
+  color: var(--vscode-input-placeholderForeground);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
 }
 @keyframes fade-in {
   0% {

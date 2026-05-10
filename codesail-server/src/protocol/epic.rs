@@ -92,7 +92,7 @@ pub enum SpecStatus {
 /// 最小可执行工作单元——对齐 Traycer 模型
 ///
 /// 字段对齐说明：
-/// - `assignee`：Traycer 字段名（CodeSail 旧版叫 assigned_agent）
+/// - `assignee`：Traycer 字段名（ClearLoop 旧版叫 assigned_agent）
 /// - `is_streaming`：Traycer 流式 UI 标识
 /// - 不存在的字段（priority / dependencies / labels / estimated_effort）已删除
 #[derive(Debug, Clone, Serialize, Deserialize)]

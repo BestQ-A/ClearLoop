@@ -1,4 +1,25 @@
-# CodeSail: Simplified Planning Layer for Coding Agents
+# ClearLoop: Clear AI Control Plane for Coding Agents
+
+ClearLoop is the user-facing VS Code layer between humans and AI coding agents.
+It is now a standalone sibling project at:
+
+```text
+E:\1_agents_space\9_AGI\ClearLoop
+```
+
+BestQ-A remains the reasoning / memory / causal core. ClearLoop owns the VS Code extension, local Rust backend, agent UI, packaging, and smoke validation. The shared contract is explicit local records, starting with `.bestqa/agent-runs/<run>/`.
+
+The product thesis is simple: AI is strong at discovering relevance, but humans need a stable handle on causality. ClearLoop turns relevant model output into explicit task state, causal hypotheses, evidence, verification, and reusable memory.
+
+The first working scaffold is the CLI handoff smoke path:
+
+```text
+ClearLoop: Create CLI Agent Handoff Smoke
+```
+
+It writes a durable `.bestqa/agent-runs/<run>/` directory with `handoff.md`, `manifest.json`, `README.md`, and `result.md` so Codex CLI / Claude Code CLI work can be reviewed and replayed instead of disappearing into chat state. See `docs/clear-ai-cli-handoff.md`.
+
+The core philosophy is documented in [`docs/product/relevance-to-causality.md`](docs/product/relevance-to-causality.md).
 
 loom.com/share/752aa7884c304b609b71b37e75e8ab74
 Overview of the video - [YouTube Video](https://www.youtube.com/watch?v=VOZYGDZvJho)
@@ -33,18 +54,18 @@ For stoping the LLM:
 ollama stop qwen2.5-coder
 ```
 
-This is a **simplified recreation of Traycer AI** as a VS Code extension, demonstrating the core "planning layer" concept. CodeSail acts as an intelligent orchestrator for coding agents: it analyzes your codebase, breaks tasks into structured, step-by-step plans, and generates actionable fixes/suggestions. This clone uses Qwen2.5 Coder LLM Model via Alibaba as the underlying agent to mimic this—providing precise planning before code changes, ensuring reliable, auditable outputs.
+This project began as a simplified planning-layer VS Code extension. Its direction is now Clear AI: a local-first interface that helps people and AI collaborate through explicit state instead of opaque chat-only reasoning.
 
 Built in **TypeScript** with a **React-based webview UI** (styled with Tailwind CSS), it integrates seamlessly into VS Code. No backend required—API keys are stored securely via VS Code's `SecretStorage`.
 
-## Why This Captures Traycer's Vision
+## Why This Exists
 
-- **Agent Integration**: Uses Qwen2.5 Coder as the "coding agent" for analysis/planning; extensible to Claude/Cursor.
-- **Verification & Review**: Outputs include issues (with severity), suggestions, fixed code, and change summaries—mirroring Traycer's auditability.
-- **Creativity**: Sidebar webview for interactive planning; secure per-user Grok key storage; async streaming for real-time feedback.
-- **Ease of Use**: One-click file selection + prompt → Instant plan/fixes in VS Code.
+- **Human interface**: ClearLoop is the layer where people can inspect, steer, and verify AI work.
+- **Explicit causality**: Relevant observations become hypotheses, evidence, actions, outcomes, and verification records.
+- **Agent integration**: Codex CLI, Claude Code CLI, and other local agents should run through auditable handoff records.
+- **Stable improvement**: Good runs should become reusable memory only after evidence and verification pass.
 
-This is a minimal, focused implementation to showcase builder thinking: Clean, modular code (Node.js extension + React UI) that works on large codebases without over-engineering.
+This is still early. The current backend binary remains `codesail-server` as an internal implementation name until a later, isolated rename.
 
 ## Features
 
@@ -67,7 +88,7 @@ This is a minimal, focused implementation to showcase builder thinking: Clean, m
 
 1. **Install Extension**:
 
-   - Search "CodeSail" in VS Code Extensions view (`Ctrl+Shift+X`).
+   - Search "ClearLoop" in VS Code Extensions view (`Ctrl+Shift+X`).
    - Install and reload VS Code.
 
 3. **Optional: GitHub Login**:
@@ -76,7 +97,7 @@ This is a minimal, focused implementation to showcase builder thinking: Clean, m
    - Shows your profile in the UI.
 
 4. **Usage**:
-   - Open CodeSail sidebar.
+   - Open ClearLoop sidebar.
    - Search/select a file (excludes node_modules/.git).
    - Enter task prompt (e.g., "Add login validation").
    - Click "Send" → Watch planning stream: Steps → Final plan/fixes.

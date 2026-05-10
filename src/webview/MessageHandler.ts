@@ -7,6 +7,7 @@ import { StreamEvent } from "../rustclient/StreamHandler";
 interface Message {
   command: string;
   data?: any;
+  [key: string]: any;
 }
 
 export function createMessageHandler(
@@ -30,6 +31,22 @@ export function createMessageHandler(
   function setWebview(newWebview: vscode.Webview) {
     webview = newWebview;
     legacyService.setWebview(newWebview);
+  }
+
+  async function postWorkflows(command = "workflowsList") {
+    const workflows = rustClient
+      ? await rustClient.request("listWorkflows")
+      : [];
+    webview?.postMessage({ command, workflows, data: workflows });
+  }
+
+  async function updateGlobalState<T>(key: string, value: T) {
+    await context.globalState.update(`clearLoop.${key}`, value);
+    return value;
+  }
+
+  function getGlobalState<T>(key: string, fallback: T): T {
+    return context.globalState.get<T>(`clearLoop.${key}`, fallback);
   }
 
   async function handleMessage(message: Message): Promise<void> {
@@ -134,6 +151,109 @@ export function createMessageHandler(
           break;
         }
 
+        // --- Traycer settings surfaces ---
+
+        case "listWorkflows":
+        case "reloadWorkflows": {
+          await postWorkflows("workflowsList");
+          break;
+        }
+
+        case "updateWorkflow": {
+          const payload = message.data ?? message;
+          const updates = getGlobalState<Record<string, unknown>>("workflowTemplateUpdates", {});
+          const key = `${payload.workflowId || payload.workflow_id || payload.workflow}-${payload.stepId || payload.step_id || payload.step}`;
+          updates[key] = payload || {};
+          await updateGlobalState("workflowTemplateUpdates", updates);
+          webview.postMessage({ command: "workflowUpdated", data: payload });
+          break;
+        }
+
+        case "setWorkflowEnabled": {
+          const payload = message.data ?? message;
+          const flags = getGlobalState<Record<string, boolean>>("workflowEnabled", {});
+          const workflowId = payload.workflowId || payload.workflow_id;
+          if (workflowId) {
+            flags[String(workflowId)] = Boolean(payload.enabled);
+            await updateGlobalState("workflowEnabled", flags);
+          }
+          webview.postMessage({ command: "workflowEnabledChanged", data: payload });
+          break;
+        }
+
+        case "setDefaultAgent": {
+          const payload = message.data ?? message;
+          const agentId = String(payload.agentId || payload.agent_id || "claude-code");
+          await vscode.workspace
+            .getConfiguration("clearLoop")
+            .update("executionAgent", agentId, vscode.ConfigurationTarget.Global);
+          webview.postMessage({ command: "defaultAgentChanged", data: { agentId } });
+          break;
+        }
+
+        case "removeAgent": {
+          webview.postMessage({ command: "agentRemoved", data: message.data ?? message });
+          break;
+        }
+
+        case "commitScripts.list": {
+          const scripts = getGlobalState<unknown[]>("commitScripts", []);
+          webview.postMessage({ command: "commitScripts.list", data: scripts });
+          break;
+        }
+
+        case "commitScripts.add": {
+          const payload = message.data ?? message;
+          const scripts = getGlobalState<any[]>("commitScripts", []);
+          const next = [...scripts.filter((s) => s.id !== payload.payload?.id), payload.payload];
+          await updateGlobalState("commitScripts", next.filter(Boolean));
+          webview.postMessage({ command: "commitScripts.list", data: next.filter(Boolean) });
+          break;
+        }
+
+        case "commitScripts.delete": {
+          const payload = message.data ?? message;
+          const scripts = getGlobalState<any[]>("commitScripts", []);
+          const next = scripts.filter((s) => s.id !== payload.scriptId);
+          await updateGlobalState("commitScripts", next);
+          webview.postMessage({ command: "commitScripts.list", data: next });
+          break;
+        }
+
+        case "modelProfiles.list": {
+          const profiles = getGlobalState<unknown[]>("modelProfiles", []);
+          webview.postMessage({ command: "modelProfiles.list", data: profiles });
+          break;
+        }
+
+        case "modelProfiles.upsert": {
+          const wrapper = message.data ?? message;
+          const profiles = getGlobalState<any[]>("modelProfiles", []);
+          const payload = wrapper.payload;
+          const next = payload
+            ? [...profiles.filter((p) => p.id !== payload.id), payload]
+            : profiles;
+          await updateGlobalState("modelProfiles", next);
+          webview.postMessage({ command: "modelProfiles.list", data: next });
+          break;
+        }
+
+        case "modelProfiles.activate": {
+          const payload = message.data ?? message;
+          await updateGlobalState("activeModelProfile", payload.profileId || "balanced");
+          webview.postMessage({ command: "modelProfiles.active", data: payload });
+          break;
+        }
+
+        case "modelProfiles.delete": {
+          const payload = message.data ?? message;
+          const profiles = getGlobalState<any[]>("modelProfiles", []);
+          const next = profiles.filter((p) => p.id !== payload.profileId);
+          await updateGlobalState("modelProfiles", next);
+          webview.postMessage({ command: "modelProfiles.list", data: next });
+          break;
+        }
+
         // --- History ---
 
         case "history": {
@@ -189,7 +309,10 @@ export function createMessageHandler(
 
         case "getEpic": {
           if (!rustClient) break;
-          const result = await rustClient.request("getEpic", message.data);
+          const payload = message.data ?? message;
+          const result = await rustClient.request("getEpic", {
+            id: payload.id || payload.epic_id,
+          });
           webview.postMessage({ command: "epicDetail", data: result });
           break;
         }
@@ -258,7 +381,15 @@ export function createMessageHandler(
 
         case "startExecution": {
           if (!rustClient) break;
-          const result = await rustClient.request("startExecution", message.data);
+          const payload = message.data ?? message;
+          if (!payload.ticket_id) {
+            webview.postMessage({
+              command: "error",
+              text: "Select a ticket before starting execution.",
+            });
+            break;
+          }
+          const result = await rustClient.request("startExecution", payload);
           webview.postMessage({ command: "executionStarted", data: result });
           break;
         }
@@ -279,6 +410,50 @@ export function createMessageHandler(
           } catch (err: any) {
             webview.postMessage({ command: "error", text: `Verification failed: ${err.message}` });
           }
+          break;
+        }
+
+        case "verifyEpic": {
+          webview.postMessage({
+            command: "verifyResult",
+            data: { threads: [] },
+          });
+          break;
+        }
+
+        case "openEpicChat": {
+          const payload = message.data ?? message;
+          webview.postMessage({
+            command: "navigate",
+            path: `/epic/chat/${payload.epic_id || payload.id || "new"}`,
+          });
+          break;
+        }
+
+        case "openHistory": {
+          webview.postMessage({ command: "navigate", path: "/history" });
+          break;
+        }
+
+        case "openNotifications": {
+          webview.postMessage({ command: "navigate", path: "/notifications" });
+          break;
+        }
+
+        case "shareEpic": {
+          const payload = message.data ?? message;
+          await vscode.env.clipboard.writeText(String(payload.epic_id || payload.id || ""));
+          webview.postMessage({ command: "epicShared", data: payload });
+          break;
+        }
+
+        case "reVerify": {
+          webview.postMessage({ command: "verifyResult", data: { threads: [] } });
+          break;
+        }
+
+        case "resolveComment": {
+          webview.postMessage({ command: "commentResolved", data: message.data });
           break;
         }
 
@@ -419,18 +594,44 @@ export function createMessageHandler(
           break;
         }
 
+        case "cancelStream": {
+          webview.postMessage({ command: "streamEnd" });
+          break;
+        }
+
+        // --- Epic Chat 流式 ---
+        // webview → 扩展 → Rust JSON-RPC `epicChatStream`；
+        // Rust 端通过 streamHandler 推 epicFieldAppend / epicFieldAdded / epicFinal，
+        // 顶部 streamHandler.on("stream", ...) 已经把所有 stream 事件原样转发到 webview。
+        case "epicChatStream": {
+          if (!rustClient) {
+            webview.postMessage({ command: "error", text: "Rust server not available" });
+            return;
+          }
+          webview.postMessage({ command: "streamStart" });
+          try {
+            const result = await rustClient.request("epicChatStream", message.data);
+            webview.postMessage({ command: "epicFinal", data: result });
+          } catch (err: any) {
+            webview.postMessage({ command: "error", text: `Epic chat failed: ${err.message}` });
+          } finally {
+            webview.postMessage({ command: "streamEnd" });
+          }
+          break;
+        }
+
         // --- 原有命令 ---
 
         case "github-authentication":
           webview.postMessage({ command: "userProfile", data: null });
           break;
 
-        // --- i18n: webview 切换语言后，把选择回写到 VS Code setting，
-        //     ViewProvider 的 onDidChangeConfiguration 监听到后，
-        //     会再 push 一条 codesail-locale 到所有 webview，保持一致。
+        // --- i18n: persist the webview language choice back to clearLoop.languagePreference.
+        case "clearLoop-locale-set":
+        case "traycer-locale-set":
         case "codesail-locale-set": {
           const next = typeof message.data === "string" ? message.data : "en";
-          const config = vscode.workspace.getConfiguration("codesail");
+          const config = vscode.workspace.getConfiguration("clearLoop");
           await config.update(
             "languagePreference",
             next,

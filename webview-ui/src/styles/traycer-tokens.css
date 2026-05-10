@@ -1,5 +1,5 @@
 /* Traycer 设计 token：硬编码 hex 全部封装成 CSS 变量
- * 来源：external/CodeSail/TRAYCER_UI_TEARDOWN.md §E (Severity / category badges, Diff viewer)
+ * Legacy UI reference: TRAYCER_UI_TEARDOWN.md section E (Severity / category badges, Diff viewer)
  * 严禁用接近色或 tailwind 默认色替换。
  */
 

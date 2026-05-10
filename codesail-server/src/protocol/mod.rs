@@ -1,9 +1,10 @@
+pub mod agents;
 pub mod epic;
+pub mod epic_chat;
+pub mod mcp;
+pub mod streaming;
 pub mod verification;
 pub mod yolo;
-pub mod streaming;
-pub mod agents;
-pub mod mcp;
 
 use serde::{Deserialize, Serialize};
 

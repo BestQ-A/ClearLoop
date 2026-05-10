@@ -187,7 +187,7 @@ export interface Ticket {
   title: string;
   description: string;
   status: TicketStatus;
-  /** Traycer 字段名（旧 CodeSail 叫 assigned_agent，已重命名） */
+  /** Traycer 字段名（legacy schema called this assigned_agent） */
   assignee: string | null;
   /** Traycer 流式 UI 标识 */
   isStreaming: boolean;
@@ -300,3 +300,89 @@ export interface Conversation {
 export type ViewMode = "home" | "plan" | "validation" | "settings" | "history" | "epic" | "epicDetail" | "verification" | "agents" | "yolo" | "mcp";
 
 export const lucideIcons = { List, FileText, Eye, RefreshCw, Settings, History, Zap } as const;
+
+// =====================================================================
+// Epic Chat 多轮对话协议
+//
+// 与 Rust agent 完全对齐（不要随意改字段名/可选性）：
+//   - EpicChatRequest / Turn        ：webview → extension → Rust
+//   - EpicOutput / OrderedField     ：Rust → extension → webview（流式聚合后的最终结果）
+//   - StreamEvent.type 扩展三个 epic 专用事件：
+//       "epicFieldAppend"  增量追加（markdown 流式 token）
+//       "epicFieldAdded"   一个 ordered field 新增并锁定
+//       "epicFinal"        本轮所有 fields 完成
+//
+// 注意：这里的 Turn 与上面 ConversationTurn 是两套独立模型并存。
+//   - ConversationTurn：旧 plan / validation 链路使用
+//   - Turn（这里）    ：epic chat 多轮对话使用，直接对齐 Rust 协议
+// =====================================================================
+
+/** Epic chat 多轮对话单轮消息（与 Rust 协议字段名对齐） */
+export interface Turn {
+  role: "user" | "assistant";
+  /** workflow step 标识（如 "trigger" / "tech-plan" / "epic-brief"） */
+  step: string;
+  /** turn 主体内容，markdown 文本 */
+  markdown: string;
+  /** ISO 时间戳 */
+  timestamp: string;
+}
+
+/** webview → extension：发起一轮 epic chat 流式请求 */
+export interface EpicChatRequest {
+  /** 第一次发起时缺省，由 Rust 生成；后续轮次必须回传 */
+  conversationId?: string;
+  workflow: "plan" | "refactoring" | "agile";
+  currentStep: string;
+  userPrompt: string;
+  previousTurns: Turn[];
+}
+
+/** 用户问答交互项 */
+export interface Question {
+  id: string;
+  title: string;
+  description?: string;
+  options: string[];
+  multiselect: boolean;
+}
+
+/** Next-step 选项（assistant 推荐下一步） */
+export interface NextStepOption {
+  name: string;
+  description?: string;
+}
+
+/**
+ * Handoff 请求：把 ticket 派发给某个 agent 执行。
+ *
+ * 注：webview-ui 既有 Execution / ExecutionAgentType 模型偏向 epic kanban 视角，
+ * Rust 协议里的 HandoffRequest 是 epic chat 流里 ordered field 的载荷，独立保留。
+ */
+export interface HandoffRequest {
+  id: string;
+  ticketId?: string;
+  agent?: string;
+  status?: string;
+}
+
+/** 一个 epic chat 输出由有序 field 列表组成，UI 按顺序流式 append/render。 */
+export type OrderedField =
+  | { type: "markdown"; content: string }
+  | { type: "interview"; question: Question }
+  | { type: "ticketsGroup"; tickets: Ticket[] }
+  | { type: "nextSteps"; options: NextStepOption[] }
+  | { type: "executionRequests"; requests: HandoffRequest[] };
+
+/** Rust → webview：本轮 epic chat 完整输出（流结束时的聚合视图） */
+export interface EpicOutput {
+  conversationId: string;
+  step: string;
+  orderedFields: OrderedField[];
+}
+
+/** Epic chat 流事件 type 子集（StreamEvent.type 是 string，这里仅为常量收敛） */
+export type EpicStreamEventType =
+  | "epicFieldAppend"
+  | "epicFieldAdded"
+  | "epicFinal";

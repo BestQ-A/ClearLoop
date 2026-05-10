@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod codex;
 pub mod ollama;
 pub mod openai;
 

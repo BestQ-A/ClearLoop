@@ -40,21 +40,16 @@ export function createViewProvider(
       messageHandler.handleMessage(message)
     );
 
-    // 把 VS Code 设置 codesail.languagePreference 同步到 webview。
-    // Traycer 的 languagePreference 设置同时控制 LLM 输出语言 + UI 显示语言。
-    // 这里两者都管：webview 收到 setLocale 后切 UI；后续 LLM 调用从设置读再传给后端。
+    // Keep ClearLoop's languagePreference synced into the webview.
     const pushLocale = () => {
       const lang =
-        vscode.workspace.getConfiguration("codesail").get<string>("languagePreference") ||
+        vscode.workspace.getConfiguration("clearLoop").get<string>("languagePreference") ||
         "en";
-      // command 名约定为 `codesail-locale`，I18nContext 监听同名 message
-      webview?.postMessage({ command: "codesail-locale", data: lang });
+      webview?.postMessage({ command: "clearLoop-locale", data: lang });
     };
-    // 初次推送
     pushLocale();
-    // 设置变更时再推送
     const sub = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("codesail.languagePreference")) {
+      if (e.affectsConfiguration("clearLoop.languagePreference")) {
         pushLocale();
       }
     });
@@ -68,7 +63,7 @@ export function createViewProvider(
   }
 
   return {
-    viewId: "codesailView",
+    viewId: "clearLoop.commentNavigatorWebview",
     resolveWebviewView,
     sendAuthRequest,
     postMessage,

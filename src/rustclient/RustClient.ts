@@ -4,12 +4,12 @@ import * as vscode from "vscode";
 import { StreamHandler, StreamEvent } from "./StreamHandler";
 
 /**
- * 把 VS Code 设置 (`codesail.*`) 转成 codesail-server 启动用的环境变量。
+ * Map VS Code settings (`clearLoop.*`) into codesail-server environment vars.
  * 用户可以在 settings.json 里配自己的 LLM endpoint / key / model，
  * 不再需要 hardcode 或写 launch script。
  */
 function buildServerEnv(): NodeJS.ProcessEnv {
-    const cfg = vscode.workspace.getConfiguration("codesail");
+    const cfg = vscode.workspace.getConfiguration("clearLoop");
     const env: NodeJS.ProcessEnv = { ...process.env };
 
     const provider = cfg.get<string>("defaultProvider") || "ollama";
@@ -18,6 +18,10 @@ function buildServerEnv(): NodeJS.ProcessEnv {
     const apiKey = cfg.get<string>("apiKey") || "";
 
     env.CODESAIL_DEFAULT_PROVIDER = provider;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspaceRoot) {
+        env.CODESAIL_WORKSPACE_ROOT = workspaceRoot;
+    }
 
     // OpenAI-compatible: 任何走 /v1/chat/completions 的 endpoint
     // （MiMo Token-Plan, Together, Groq, OpenRouter, vLLM 自部署 …）

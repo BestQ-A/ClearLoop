@@ -12,7 +12,7 @@ interface Props {
 
 /**
  * Traycer 完整 Supported Agent 注册表 —— 严格 23 项
- * 来源：external/CodeSail/TRAYCER_UI_TEARDOWN.md §F
+ * Legacy UI reference: TRAYCER_UI_TEARDOWN.md section F.
  *   - SupportedAgentIDs（23 个 id）
  *   - AGENT_METADATA（type / displayName）
  *

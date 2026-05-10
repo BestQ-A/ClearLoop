@@ -29,25 +29,34 @@ const I18nContext = createContext<I18nContextValue>({
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(() => {
-    const saved = localStorage.getItem("codesail-locale");
+    const saved =
+      localStorage.getItem("clearLoop-locale") ||
+      localStorage.getItem("traycer-locale") ||
+      localStorage.getItem("codesail-locale");
     return normalizeLocale(saved);
   });
 
   const setLocale = useCallback((newLocale: Locale) => {
     const norm = normalizeLocale(newLocale);
     setLocaleState(norm);
-    localStorage.setItem("codesail-locale", norm);
+    localStorage.setItem("clearLoop-locale", norm);
   }, []);
 
-  // 监听 VSCode 扩展推过来的 codesail-locale 消息
-  // ViewProvider.ts 在 webview 创建时和 codesail.languagePreference 设置变更时都会推
+  // The public extension namespace is clearLoop.*, while old locale
+  // messages remain accepted for archived webviews.
   useEffect(() => {
     function onMessage(event: MessageEvent) {
       const msg = event.data;
-      if (msg && msg.command === "codesail-locale" && typeof msg.data === "string") {
+      if (
+        msg &&
+        (msg.command === "clearLoop-locale" ||
+          msg.command === "traycer-locale" ||
+          msg.command === "codesail-locale") &&
+        typeof msg.data === "string"
+      ) {
         const norm = normalizeLocale(msg.data);
         setLocaleState(norm);
-        localStorage.setItem("codesail-locale", norm);
+        localStorage.setItem("clearLoop-locale", norm);
       }
     }
     window.addEventListener("message", onMessage);

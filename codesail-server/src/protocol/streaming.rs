@@ -9,39 +9,23 @@ use super::{FileChange, PlanStep, ValidationComment};
 #[serde(tag = "type", content = "data")]
 pub enum StreamEvent {
     /// 逐 token 输出
-    Token {
-        text: String,
-    },
+    Token { text: String },
     /// 思考步骤开始
-    ThinkingStart {
-        step_title: String,
-    },
+    ThinkingStart { step_title: String },
     /// 思考步骤结束
-    ThinkingEnd {
-        step_id: String,
-    },
+    ThinkingEnd { step_id: String },
     /// 计划生成开始
-    PlanStart {
-        task_name: String,
-    },
+    PlanStart { task_name: String },
     /// 计划中的一步
-    PlanStep {
-        step: PlanStep,
-    },
+    PlanStep { step: PlanStep },
     /// 验证开始
     ValidationStart,
     /// 验证评论
-    ValidationComment {
-        comment: ValidationComment,
-    },
+    ValidationComment { comment: ValidationComment },
     /// 代码生成开始（指定文件）
-    GenerationStart {
-        file_path: String,
-    },
+    GenerationStart { file_path: String },
     /// 代码生成完成
-    GenerationComplete {
-        file_change: FileChange,
-    },
+    GenerationComplete { file_change: FileChange },
     /// 阶段进度
     Progress {
         phase: String,
@@ -49,13 +33,18 @@ pub enum StreamEvent {
         message: String,
     },
     /// 错误
-    Error {
-        code: i32,
-        message: String,
-    },
+    Error { code: i32, message: String },
     /// 完成信号
-    Done {
-        result_type: String,
+    Done { result_type: String },
+    /// 通用扩展事件——给 Epic Chat 这类需要自定义 wire-format 的链路用。
+    /// `event_type` 即对外的字符串名（`epicFieldAppend` / `epicFieldAdded` / `epicFinal`），
+    /// `payload` 是结构化的事件载荷（任意 JSON）。
+    ///
+    /// 序列化为 `{"type":"Custom","data":{"eventType":"...","payload":{...}}}`。
+    Custom {
+        #[serde(rename = "eventType")]
+        event_type: String,
+        payload: serde_json::Value,
     },
 }
 
@@ -72,7 +61,11 @@ impl fmt::Display for StreamEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match serde_json::to_string(self) {
             Ok(json) => write!(f, "{}", json),
-            Err(e) => write!(f, "{{\"type\":\"Error\",\"data\":{{\"code\":-1,\"message\":\"序列化失败: {}\"}}}}", e),
+            Err(e) => write!(
+                f,
+                "{{\"type\":\"Error\",\"data\":{{\"code\":-1,\"message\":\"序列化失败: {}\"}}}}",
+                e
+            ),
         }
     }
 }
@@ -104,7 +97,11 @@ pub fn make_stream_notification(message: StreamMessage) -> JsonRpcNotification {
 }
 
 /// 便捷函数：从事件+序号创建完整的通知消息
-pub fn make_stream_event_notification(id: u64, event: StreamEvent, timestamp: String) -> JsonRpcNotification {
+pub fn make_stream_event_notification(
+    id: u64,
+    event: StreamEvent,
+    timestamp: String,
+) -> JsonRpcNotification {
     make_stream_notification(StreamMessage {
         id,
         event,

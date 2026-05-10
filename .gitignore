@@ -8,13 +8,20 @@ dist/
 webview-ui/build/
 webview-ui/dist/
 codesail-server/target/
+bin/
 
 # VS Code extension packaging
 .vscode-test/
 .vscode/
+*.vsix
 
 # Logs
 *.log
+
+# Runtime databases
+*.db
+*.db-shm
+*.db-wal
 
 # Environment / secrets
 .env

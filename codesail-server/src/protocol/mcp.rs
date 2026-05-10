@@ -15,7 +15,9 @@ pub struct McpServerConfig {
     pub disabled: bool,
 }
 
-fn default_scope() -> McpScope { McpScope::User }
+fn default_scope() -> McpScope {
+    McpScope::User
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]

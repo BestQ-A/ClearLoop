@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -227,7 +227,9 @@ impl YoloRunner {
             format!("YOLO 运行完成：{} 个工单已处理", results.len()),
         );
 
-        Ok(YoloRunResult { executions: results })
+        Ok(YoloRunResult {
+            executions: results,
+        })
     }
 
     /// 取消正在运行的 YOLO 循环
@@ -308,7 +310,8 @@ impl YoloRunner {
                     format!("生成计划：{}", ticket_id),
                 );
 
-                let plan_fut = self.generate_plan(epic_id, ticket_id, code, config, provider.clone());
+                let plan_fut =
+                    self.generate_plan(epic_id, ticket_id, code, config, provider.clone());
                 let plan_result = run_cancellable(cancelled, plan_fut).await;
 
                 match plan_result {
@@ -449,10 +452,7 @@ impl YoloRunner {
                                 ticket_id,
                                 YoloPhase::Plan,
                                 base_pct + slice_pct * 0.1,
-                                format!(
-                                    "验证未通过，第 {}/{} 次重试",
-                                    retries, max_retries
-                                ),
+                                format!("验证未通过，第 {}/{} 次重试", retries, max_retries),
                             );
                             continue;
                         }
@@ -574,11 +574,7 @@ impl YoloRunner {
     /// 输入 ticket_ids 顺序产出，外加一个对 epic.tickets 存在性的过滤。
     /// 保留函数签名是为了上游 run_inner 不必改动；后续若要重新引入依赖图，
     /// 应通过独立的 spec_refs 或 plan 关系重建，而非把字段塞回 Ticket。
-    fn topological_sort(
-        &self,
-        epic: &Epic,
-        ticket_ids: &[String],
-    ) -> Result<Vec<String>, String> {
+    fn topological_sort(&self, epic: &Epic, ticket_ids: &[String]) -> Result<Vec<String>, String> {
         let known: std::collections::HashSet<&str> =
             epic.tickets.iter().map(|t| t.id.0.as_str()).collect();
 
@@ -641,6 +637,7 @@ where
 fn parse_agent(s: &str) -> ExecutionAgent {
     match s.to_lowercase().as_str() {
         "claudecode" | "claude_code" | "claude-code" => ExecutionAgent::ClaudeCode,
+        "codex" | "codex_cli" | "codex-cli" => ExecutionAgent::Custom("codex-cli".into()),
         "cursor" => ExecutionAgent::Cursor,
         "copilot" => ExecutionAgent::Copilot,
         "cline" => ExecutionAgent::Cline,
@@ -661,6 +658,10 @@ mod tests {
     fn test_parse_agent() {
         assert_eq!(parse_agent("claudecode"), ExecutionAgent::ClaudeCode);
         assert_eq!(parse_agent("claude-code"), ExecutionAgent::ClaudeCode);
+        assert_eq!(
+            parse_agent("codex-cli"),
+            ExecutionAgent::Custom("codex-cli".into())
+        );
         assert_eq!(parse_agent("Cursor"), ExecutionAgent::Cursor);
         assert_eq!(parse_agent("copilot"), ExecutionAgent::Copilot);
         assert_eq!(

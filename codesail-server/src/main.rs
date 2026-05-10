@@ -1,37 +1,37 @@
+mod agents;
 mod analysis;
-mod llm;
-mod protocol;
-mod persistence;
 mod epic;
+mod llm;
+mod mcp;
+mod persistence;
+mod protocol;
 mod verification;
 mod yolo;
-mod agents;
-mod mcp;
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use protocol::*;
+use protocol::agents as proto_agents;
 use protocol::epic as proto_epic;
+use protocol::epic_chat as proto_epic_chat;
+use protocol::streaming::{make_stream_event_notification, StreamEvent, StreamMessage};
 use protocol::verification as proto_verify;
 use protocol::yolo as proto_yolo;
-use protocol::agents as proto_agents;
-use protocol::streaming::{
-    make_stream_event_notification, StreamEvent, StreamMessage,
-};
+use protocol::*;
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
-use llm::{LlmProvider, StreamChunk};
+use agents::AgentOrchestrator;
+use epic::EpicManager;
+use llm::codex::CodexProvider;
 use llm::ollama::OllamaProvider;
 use llm::openai::OpenAiProvider;
-use persistence::SqliteStore;
-use epic::EpicManager;
-use verification::VerificationEngine;
-use agents::AgentOrchestrator;
-use yolo::YoloRunner;
+use llm::{LlmProvider, StreamChunk};
 use mcp::McpManager;
+use persistence::SqliteStore;
+use verification::VerificationEngine;
+use yolo::YoloRunner;
 
 /// 共享 stdout 写入句柄。所有 stdout 写入（同步响应 + 流式通知）都
 /// 必须经过这个 Mutex，避免请求处理线程与流式后台任务交错写出半行 JSON。
@@ -62,8 +62,8 @@ impl AppState {
     fn new() -> Self {
         let ollama_endpoint = std::env::var("CODESAIL_OLLAMA_ENDPOINT")
             .unwrap_or_else(|_| "http://localhost:11434".into());
-        let ollama_model = std::env::var("CODESAIL_OLLAMA_MODEL")
-            .unwrap_or_else(|_| "qwen3.5:9b".into());
+        let ollama_model =
+            std::env::var("CODESAIL_OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".into());
 
         let ollama = Arc::new(OllamaProvider::new(llm::LlmConfig {
             endpoint: ollama_endpoint,
@@ -76,12 +76,24 @@ impl AppState {
         let mut providers: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
         providers.insert("ollama".into(), ollama);
 
+        // 自动注册 Codex CLI provider，复用用户已登录的 ChatGPT 配额（gpt-5.5 等）。
+        // 不需要 API key；如需自定义 codex 可执行路径用 CODESAIL_CODEX_BIN。
+        let codex_default_model =
+            std::env::var("CODESAIL_CODEX_MODEL").unwrap_or_else(|_| "gpt-5.5".into());
+        let codex = Arc::new(CodexProvider::new(llm::LlmConfig {
+            endpoint: String::new(), // codex 不需要 endpoint
+            model: codex_default_model,
+            api_key: None,
+            temperature: None,
+            max_tokens: None,
+        }));
+        providers.insert("codex".into(), codex);
+
         // 自动注册 OpenAI 兼容 API（通过环境变量配置）
         // 支持: CODESAIL_API_ENDPOINT + CODESAIL_API_KEY + CODESAIL_API_MODEL
         if let Ok(endpoint) = std::env::var("CODESAIL_API_ENDPOINT") {
             let api_key = std::env::var("CODESAIL_API_KEY").ok();
-            let model = std::env::var("CODESAIL_API_MODEL")
-                .unwrap_or_else(|_| "gpt-4o".into());
+            let model = std::env::var("CODESAIL_API_MODEL").unwrap_or_else(|_| "gpt-4o".into());
             let custom = Arc::new(OpenAiProvider::new(llm::LlmConfig {
                 endpoint,
                 model,
@@ -92,21 +104,23 @@ impl AppState {
             providers.insert("openai".into(), custom);
         }
 
-        let store = Arc::new(
-            SqliteStore::new("codesail.db").expect("Failed to open SQLite database"),
-        );
+        let store =
+            Arc::new(SqliteStore::new("codesail.db").expect("Failed to open SQLite database"));
         let epic_mgr = Arc::new(EpicManager::new(store.clone()));
         let verify_engine = Arc::new(VerificationEngine::new(store.clone()));
         let agent_orch = Arc::new(RwLock::new(AgentOrchestrator::new()));
         let yolo_runner = Arc::new(YoloRunner::new(epic_mgr.clone(), verify_engine.clone()));
         let mcp_mgr = Arc::new(McpManager::new());
 
-        // 默认 provider 走环境变量；若用户配了 openai 端点就默认用 openai
+        // 默认 provider 走环境变量；优先级：codex > openai > ollama。
+        // codex 总是注册（已登录 codex CLI 即可用），所以默认就是 codex。
         let default_provider = std::env::var("CODESAIL_DEFAULT_PROVIDER")
             .ok()
             .filter(|s| providers.contains_key(s))
             .unwrap_or_else(|| {
-                if providers.contains_key("openai") {
+                if providers.contains_key("codex") {
+                    "codex".into()
+                } else if providers.contains_key("openai") {
                     "openai".into()
                 } else {
                     "ollama".into()
@@ -236,7 +250,9 @@ async fn handle_request(
         "setProvider" => {
             let params: SetProviderParams = match serde_json::from_value(req.params) {
                 Ok(p) => p,
-                Err(e) => return JsonRpcResponse::err(id, -32602, format!("Invalid params: {}", e)),
+                Err(e) => {
+                    return JsonRpcResponse::err(id, -32602, format!("Invalid params: {}", e))
+                }
             };
             set_provider(state, params).await;
             JsonRpcResponse::ok(id, serde_json::json!({"status": "ok"}))
@@ -341,6 +357,36 @@ async fn handle_request(
             }
         }
 
+        // === Epic Chat（Traycer 多轮对话工作流） ===
+        // 非流式版：一次性返回 EpicOutput（无 stream notifications）
+        "epicChat" => {
+            let params: proto_epic_chat::EpicChatRequest = try_parse!(id, req.params);
+            match run_epic_chat(state, params).await {
+                Ok(r) => JsonRpcResponse::ok(id, serde_json::to_value(r).unwrap()),
+                Err(e) => JsonRpcResponse::err(id, -32603, e),
+            }
+        }
+
+        // 流式版：先连续 emit epicFieldAppend / epicFieldAdded，最终 emit epicFinal
+        // 同时把 EpicOutput 作为 JSON-RPC response 返回（id 匹配）
+        "epicChatStream" => {
+            let params: proto_epic_chat::EpicChatRequest = try_parse!(id, req.params);
+            match run_epic_chat_stream(state, params, stdout).await {
+                Ok(r) => JsonRpcResponse::ok(id, serde_json::to_value(r).unwrap()),
+                Err(e) => {
+                    emit_stream(
+                        stdout,
+                        StreamEvent::Error {
+                            code: -32603,
+                            message: e.clone(),
+                        },
+                    )
+                    .await;
+                    JsonRpcResponse::err(id, -32603, e)
+                }
+            }
+        }
+
         // === Epic CRUD ===
         "createEpic" => {
             let params: proto_epic::CreateEpicParams = try_parse!(id, req.params);
@@ -361,7 +407,9 @@ async fn handle_request(
 
         "getEpic" => {
             #[derive(serde::Deserialize)]
-            struct P { id: String }
+            struct P {
+                id: String,
+            }
             let p: P = try_parse!(id, req.params);
             let s = state.read().await;
             match s.epic_mgr.get_epic(&p.id) {
@@ -381,7 +429,9 @@ async fn handle_request(
 
         "deleteEpic" => {
             #[derive(serde::Deserialize)]
-            struct P { id: String }
+            struct P {
+                id: String,
+            }
             let p: P = try_parse!(id, req.params);
             let s = state.read().await;
             match s.epic_mgr.delete_epic(&p.id) {
@@ -411,7 +461,10 @@ async fn handle_request(
 
         "deleteSpec" => {
             #[derive(serde::Deserialize)]
-            struct P { epic_id: String, spec_id: String }
+            struct P {
+                epic_id: String,
+                spec_id: String,
+            }
             let p: P = try_parse!(id, req.params);
             let s = state.read().await;
             match s.epic_mgr.delete_spec(&p.epic_id, &p.spec_id) {
@@ -441,7 +494,10 @@ async fn handle_request(
 
         "deleteTicket" => {
             #[derive(serde::Deserialize)]
-            struct P { epic_id: String, ticket_id: String }
+            struct P {
+                epic_id: String,
+                ticket_id: String,
+            }
             let p: P = try_parse!(id, req.params);
             let s = state.read().await;
             match s.epic_mgr.delete_ticket(&p.epic_id, &p.ticket_id) {
@@ -548,9 +604,7 @@ async fn handle_request(
                     let succeeded = result
                         .executions
                         .iter()
-                        .filter(|e| {
-                            matches!(e.status, proto_epic::ExecutionStatus::Completed)
-                        })
+                        .filter(|e| matches!(e.status, proto_epic::ExecutionStatus::Completed))
                         .count();
                     let total = result.executions.len();
 
@@ -686,7 +740,10 @@ async fn handle_request(
 
         "toggleMcpServer" => {
             #[derive(serde::Deserialize)]
-            struct P { id: String, enabled: bool }
+            struct P {
+                id: String,
+                enabled: bool,
+            }
             let p: P = try_parse!(id, req.params);
             let mgr = state.read().await.mcp_mgr.clone();
             match mgr.toggle_server(&p.id, p.enabled).await {
@@ -765,28 +822,39 @@ async fn set_provider(state: &Arc<RwLock<AppState>>, params: SetProviderParams) 
 
     let provider: Arc<dyn LlmProvider> = match params.provider.as_str() {
         "ollama" => Arc::new(OllamaProvider::new(llm::LlmConfig {
-            endpoint: params.endpoint.unwrap_or_else(|| "http://localhost:11434".into()),
+            endpoint: params
+                .endpoint
+                .unwrap_or_else(|| "http://localhost:11434".into()),
             model: params.model.unwrap_or_else(|| "qwen2.5-coder".into()),
             api_key: None,
             temperature: None,
             max_tokens: None,
         })),
+        "codex" => Arc::new(CodexProvider::new(llm::LlmConfig {
+            endpoint: String::new(),
+            model: params.model.unwrap_or_else(|| "gpt-5.5".into()),
+            api_key: None,
+            temperature: None,
+            max_tokens: None,
+        })),
         "openai" => Arc::new(OpenAiProvider::new(llm::LlmConfig {
-            endpoint: params.endpoint.unwrap_or_else(|| "https://api.openai.com".into()),
+            endpoint: params
+                .endpoint
+                .unwrap_or_else(|| "https://api.openai.com".into()),
             model: params.model.unwrap_or_else(|| "gpt-4o".into()),
             api_key: params.api_key,
             temperature: None,
             max_tokens: None,
         })),
-        other => {
-            Arc::new(OpenAiProvider::new(llm::LlmConfig {
-                endpoint: params.endpoint.unwrap_or_else(|| format!("https://{}", other)),
-                model: params.model.unwrap_or_else(|| "default".into()),
-                api_key: params.api_key,
-                temperature: None,
-                max_tokens: None,
-            }))
-        }
+        other => Arc::new(OpenAiProvider::new(llm::LlmConfig {
+            endpoint: params
+                .endpoint
+                .unwrap_or_else(|| format!("https://{}", other)),
+            model: params.model.unwrap_or_else(|| "default".into()),
+            api_key: params.api_key,
+            temperature: None,
+            max_tokens: None,
+        })),
     };
 
     s.providers.insert(params.provider.clone(), provider);
@@ -799,7 +867,9 @@ async fn run_plan(state: &Arc<RwLock<AppState>>, params: PlanParams) -> Result<P
     let provider = {
         let s = state.read().await;
         if let Some(ref id) = params.provider {
-            s.providers.get(id).cloned()
+            s.providers
+                .get(id)
+                .cloned()
                 .ok_or_else(|| format!("Unknown provider: {}", id))?
         } else {
             s.active()?
@@ -839,11 +909,16 @@ async fn run_plan(state: &Arc<RwLock<AppState>>, params: PlanParams) -> Result<P
     Ok(result)
 }
 
-async fn run_validation(state: &Arc<RwLock<AppState>>, params: ValidateParams) -> Result<ValidationResult, String> {
+async fn run_validation(
+    state: &Arc<RwLock<AppState>>,
+    params: ValidateParams,
+) -> Result<ValidationResult, String> {
     let provider = {
         let s = state.read().await;
         if let Some(ref id) = params.provider {
-            s.providers.get(id).cloned()
+            s.providers
+                .get(id)
+                .cloned()
                 .ok_or_else(|| format!("Unknown provider: {}", id))?
         } else {
             s.active()?
@@ -864,18 +939,33 @@ async fn run_validation(state: &Arc<RwLock<AppState>>, params: ValidateParams) -
 
     let plan_id = result.plan_id.clone();
     let passed = result.passed;
-    if let Some(entry) = state.write().await.history.iter_mut().find(|e| e.id == plan_id) {
-        entry.status = if passed { "validated".into() } else { "needs_revision".into() };
+    if let Some(entry) = state
+        .write()
+        .await
+        .history
+        .iter_mut()
+        .find(|e| e.id == plan_id)
+    {
+        entry.status = if passed {
+            "validated".into()
+        } else {
+            "needs_revision".into()
+        };
     }
 
     Ok(result)
 }
 
-async fn run_generate(state: &Arc<RwLock<AppState>>, params: GenerateParams) -> Result<AnalyzeResult, String> {
+async fn run_generate(
+    state: &Arc<RwLock<AppState>>,
+    params: GenerateParams,
+) -> Result<AnalyzeResult, String> {
     let provider = {
         let s = state.read().await;
         if let Some(ref id) = params.provider {
-            s.providers.get(id).cloned()
+            s.providers
+                .get(id)
+                .cloned()
                 .ok_or_else(|| format!("Unknown provider: {}", id))?
         } else {
             s.active()?
@@ -894,7 +984,13 @@ async fn run_generate(state: &Arc<RwLock<AppState>>, params: GenerateParams) -> 
     let result: AnalyzeResult = parse_json(&raw)?;
 
     let plan_id = params.plan.id.clone();
-    if let Some(entry) = state.write().await.history.iter_mut().find(|e| e.id == plan_id) {
+    if let Some(entry) = state
+        .write()
+        .await
+        .history
+        .iter_mut()
+        .find(|e| e.id == plan_id)
+    {
         entry.status = "generated".into();
     }
 
@@ -917,9 +1013,7 @@ async fn drive_chat_stream(
 
     // 后台跑 LLM 流式调用
     let provider_clone = provider.clone();
-    let task = tokio::spawn(async move {
-        provider_clone.chat_stream(&system, &user, tx).await
-    });
+    let task = tokio::spawn(async move { provider_clone.chat_stream(&system, &user, tx).await });
 
     let mut accumulated = String::new();
     let mut saw_done = false;
@@ -939,13 +1033,7 @@ async fn drive_chat_stream(
         } else {
             if !chunk.delta.is_empty() {
                 accumulated.push_str(&chunk.delta);
-                emit_stream(
-                    stdout,
-                    StreamEvent::Token {
-                        text: chunk.delta,
-                    },
-                )
-                .await;
+                emit_stream(stdout, StreamEvent::Token { text: chunk.delta }).await;
             }
         }
     }
@@ -1028,13 +1116,7 @@ async fn run_plan_stream(
     )
     .await;
     for step in &result.steps {
-        emit_stream(
-            stdout,
-            StreamEvent::PlanStep {
-                step: step.clone(),
-            },
-        )
-        .await;
+        emit_stream(stdout, StreamEvent::PlanStep { step: step.clone() }).await;
     }
 
     let entry = HistoryEntry {
@@ -1194,11 +1276,16 @@ async fn run_generate_stream(
     Ok(result)
 }
 
-async fn run_analysis(state: &Arc<RwLock<AppState>>, params: AnalyzeParams) -> Result<AnalyzeResult, String> {
+async fn run_analysis(
+    state: &Arc<RwLock<AppState>>,
+    params: AnalyzeParams,
+) -> Result<AnalyzeResult, String> {
     let provider = {
         let s = state.read().await;
         if let Some(ref id) = params.provider {
-            s.providers.get(id).cloned()
+            s.providers
+                .get(id)
+                .cloned()
                 .ok_or_else(|| format!("Unknown provider: {}", id))?
         } else {
             s.active()?
@@ -1208,6 +1295,227 @@ async fn run_analysis(state: &Arc<RwLock<AppState>>, params: AnalyzeParams) -> R
     let (system, user) = analysis::build_analysis_prompt(&params.code, &params.prompt);
     let raw = provider.chat(&system, &user).await?;
     parse_json(&raw)
+}
+
+// === Epic Chat handlers (Traycer 多轮对话) ===
+
+/// 把 wire-format 的字符串 workflow（"plan" / "refactoring" / "agile"）转成
+/// 强类型 `WorkflowType`。容错大小写和常见同义词，找不到则报错。
+fn parse_workflow_str(s: &str) -> Result<WorkflowType, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "plan" => Ok(WorkflowType::Plan),
+        "refactoring" | "refactor" => Ok(WorkflowType::Refactoring),
+        "agile" => Ok(WorkflowType::Agile),
+        other => Err(format!("Unknown workflow: '{}'", other)),
+    }
+}
+
+/// 把历史轮次投影成单段 markdown，喂给 LLM 当对话上下文。
+fn render_previous_turns(turns: &[proto_epic_chat::Turn]) -> String {
+    let mut out = String::new();
+    for t in turns {
+        out.push_str(&format!("### {} ({})\n{}\n\n", t.role, t.step, t.markdown));
+    }
+    out
+}
+
+/// 拼装本轮 user message：历史 + 当前 user_prompt。
+fn build_epic_user_message(
+    previous_turns: &[proto_epic_chat::Turn],
+    current_step: &str,
+    user_prompt: &str,
+) -> String {
+    let history = render_previous_turns(previous_turns);
+    if history.is_empty() {
+        format!(
+            "## Current step\n{}\n\n## User\n{}",
+            current_step, user_prompt
+        )
+    } else {
+        format!(
+            "## Conversation so far\n{}\n## Current step\n{}\n\n## User\n{}",
+            history, current_step, user_prompt
+        )
+    }
+}
+
+/// 选 provider —— 复用 plan/validate 那套逻辑（params.provider 优先，否则 active）。
+async fn resolve_provider_for_chat(
+    state: &Arc<RwLock<AppState>>,
+    provider: &Option<String>,
+) -> Result<Arc<dyn LlmProvider>, String> {
+    let s = state.read().await;
+    if let Some(ref id) = provider {
+        s.providers
+            .get(id)
+            .cloned()
+            .ok_or_else(|| format!("Unknown provider: {}", id))
+    } else {
+        s.active()
+    }
+}
+
+/// 非流式 epicChat：一次性 chat() 拿全文 markdown，组装 EpicOutput 返回。
+async fn run_epic_chat(
+    state: &Arc<RwLock<AppState>>,
+    req: proto_epic_chat::EpicChatRequest,
+) -> Result<proto_epic_chat::EpicOutput, String> {
+    let wf = parse_workflow_str(&req.workflow)?;
+    let provider = resolve_provider_for_chat(state, &req.provider).await?;
+
+    let system = analysis::workflow::step_prompt(&wf, &req.current_step);
+    let user = build_epic_user_message(&req.previous_turns, &req.current_step, &req.user_prompt);
+
+    let raw = provider.chat(&system, &user).await?;
+
+    let next_steps = analysis::workflow::step_next_steps(&wf, &req.current_step);
+    let conversation_id = req
+        .conversation_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let mut ordered_fields: Vec<proto_epic_chat::OrderedField> = Vec::new();
+    ordered_fields.push(proto_epic_chat::OrderedField::Markdown { content: raw });
+    if !next_steps.is_empty() {
+        ordered_fields.push(proto_epic_chat::OrderedField::NextSteps {
+            options: next_steps,
+        });
+    }
+
+    Ok(proto_epic_chat::EpicOutput {
+        conversation_id,
+        step: req.current_step,
+        ordered_fields,
+    })
+}
+
+/// 流式版本：每来一个 token 推一次 `epicFieldAppend`（fieldIndex 始终
+/// 指向当前 markdown 字段），结束后追加 nextSteps 字段并发 `epicFinal`。
+async fn run_epic_chat_stream(
+    state: &Arc<RwLock<AppState>>,
+    req: proto_epic_chat::EpicChatRequest,
+    stdout: &SharedStdout,
+) -> Result<proto_epic_chat::EpicOutput, String> {
+    let wf = parse_workflow_str(&req.workflow)?;
+    let provider = resolve_provider_for_chat(state, &req.provider).await?;
+
+    let conversation_id = req
+        .conversation_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    emit_stream(
+        stdout,
+        StreamEvent::Progress {
+            phase: "EpicChat".into(),
+            percent: 0.0,
+            message: format!("Generating step '{}'", req.current_step),
+        },
+    )
+    .await;
+
+    let system = analysis::workflow::step_prompt(&wf, &req.current_step);
+    let user = build_epic_user_message(&req.previous_turns, &req.current_step, &req.user_prompt);
+
+    // markdown 字段固定占据 ordered_fields[0]
+    let markdown_field_index: usize = 0;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamChunk>(64);
+    let provider_clone = provider.clone();
+    let system_clone = system.clone();
+    let user_clone = user.clone();
+    let task = tokio::spawn(async move {
+        provider_clone
+            .chat_stream(&system_clone, &user_clone, tx)
+            .await
+    });
+
+    let mut accumulated = String::new();
+    while let Some(chunk) = rx.recv().await {
+        if chunk.done {
+            // chat_stream 可能在 done=true 后再发空 chunk；此处不 break，
+            // 让 sender drop 自然关 channel。
+            continue;
+        }
+        if chunk.delta.is_empty() {
+            continue;
+        }
+        accumulated.push_str(&chunk.delta);
+        emit_stream(
+            stdout,
+            StreamEvent::Custom {
+                event_type: "epicFieldAppend".into(),
+                payload: serde_json::json!({
+                    "fieldIndex": markdown_field_index,
+                    "textDelta": chunk.delta,
+                }),
+            },
+        )
+        .await;
+    }
+
+    let final_text = match task.await {
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => return Err(e),
+        Err(join_err) => return Err(format!("epicChatStream task join error: {}", join_err)),
+    };
+    let raw = if final_text.is_empty() {
+        accumulated
+    } else {
+        final_text
+    };
+
+    // 组装 ordered_fields
+    let next_steps = analysis::workflow::step_next_steps(&wf, &req.current_step);
+    let mut ordered_fields: Vec<proto_epic_chat::OrderedField> = Vec::new();
+    ordered_fields.push(proto_epic_chat::OrderedField::Markdown {
+        content: raw.clone(),
+    });
+
+    // 推送非 markdown 字段时同时 emit epicFieldAdded
+    if !next_steps.is_empty() {
+        let field = proto_epic_chat::OrderedField::NextSteps {
+            options: next_steps.clone(),
+        };
+        let field_index = ordered_fields.len();
+        ordered_fields.push(field.clone());
+        emit_stream(
+            stdout,
+            StreamEvent::Custom {
+                event_type: "epicFieldAdded".into(),
+                payload: serde_json::json!({
+                    "fieldIndex": field_index,
+                    "field": field,
+                }),
+            },
+        )
+        .await;
+    }
+
+    let output = proto_epic_chat::EpicOutput {
+        conversation_id,
+        step: req.current_step.clone(),
+        ordered_fields,
+    };
+
+    // 最终事件：完整 EpicOutput 平铺进 payload
+    emit_stream(
+        stdout,
+        StreamEvent::Custom {
+            event_type: "epicFinal".into(),
+            payload: serde_json::to_value(&output).unwrap_or_else(|_| serde_json::json!({})),
+        },
+    )
+    .await;
+    emit_stream(
+        stdout,
+        StreamEvent::Done {
+            result_type: "epicChat".into(),
+        },
+    )
+    .await;
+
+    Ok(output)
 }
 
 // === Utilities ===
@@ -1223,8 +1531,13 @@ fn parse_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, String> {
         .trim()
         .to_string();
 
-    serde_json::from_str::<T>(&cleaned)
-        .map_err(|e| format!("Failed to parse LLM response: {}. Raw: {}", e, &raw[..raw.len().min(200)]))
+    serde_json::from_str::<T>(&cleaned).map_err(|e| {
+        format!(
+            "Failed to parse LLM response: {}. Raw: {}",
+            e,
+            &raw[..raw.len().min(200)]
+        )
+    })
 }
 
 fn chrono_now() -> String {

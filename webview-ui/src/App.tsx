@@ -1,16 +1,12 @@
-import { MemoryRouter } from "react-router-dom";
-import Homepage from "./pages/Homepage";
+import { RouterProvider } from "react-router-dom";
 import { I18nProvider } from "./i18n/I18nContext";
+import { router } from "./router";
 
 function App() {
   return (
-    <MemoryRouter initialEntries={["/"]}>
-      <I18nProvider>
-        <div>
-          <Homepage />
-        </div>
-      </I18nProvider>
-    </MemoryRouter>
+    <I18nProvider>
+      <RouterProvider router={router} />
+    </I18nProvider>
   );
 }
 

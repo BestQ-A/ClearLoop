@@ -6,9 +6,13 @@ import type {
   PlanResult,
   ValidationResult,
   StreamEvent,
+  OrderedField,
+  NextStepOption,
 } from "../../types/Homepage";
 import PlanView from "./PlanView";
 import { useI18n } from "../../i18n/I18nContext";
+import NextStepsPicker from "./NextStepsPicker";
+import ClarificationCard from "./ClarificationCard";
 
 // =====================================================================
 // Props
@@ -20,6 +24,15 @@ interface Props {
   streamEvents: StreamEvent[]; // 当前流式 turn 的事件流
   onValidate: () => void;
   onGenerate: (agent: string) => void;
+  /**
+   * epicChat 多轮对话的有序字段流：MarkdownTurn / Interview / TicketsGroup /
+   * NextSteps / ExecutionRequests 等。来自 reducer，按顺序渲染在 turns 之后。
+   */
+  streamingFields?: OrderedField[];
+  /** 用户从 NextStepsPicker 选了某个选项的回调（name 由 server 决定） */
+  onPickNextStep?: (name: string) => void;
+  /** 用户回答 ClarificationCard 的回调 */
+  onAnswerInterview?: (questionId: string, selected: string[]) => void;
 }
 
 // =====================================================================
@@ -393,6 +406,82 @@ const StreamingTurn = ({ events }: { events: StreamEvent[] }) => {
 };
 
 // =====================================================================
+// 子组件：OrderedField 渲染派发
+// =====================================================================
+
+interface OrderedFieldRendererProps {
+  field: OrderedField;
+  onPickNextStep?: (name: string) => void;
+  onAnswerInterview?: (questionId: string, selected: string[]) => void;
+}
+
+const OrderedFieldRenderer = ({
+  field,
+  onPickNextStep,
+  onAnswerInterview,
+}: OrderedFieldRendererProps) => {
+  switch (field.type) {
+    case "markdown":
+      // 流式 markdown：保持光标动效
+      return (
+        <div className="text-[var(--vscode-foreground)] w-full mb-2">
+          <Markdown>{field.content}</Markdown>
+          <span
+            className="inline-block w-[6px] h-[11px] ml-0.5 align-middle animate-pulse"
+            style={{ background: "var(--vscode-foreground)" }}
+          />
+        </div>
+      );
+    case "interview":
+      return (
+        <ClarificationCard
+          question={field.question}
+          onAnswer={(selected) =>
+            onAnswerInterview?.(field.question.id, selected)
+          }
+        />
+      );
+    case "nextSteps":
+      return (
+        <NextStepsPicker
+          options={field.options}
+          onPick={(name) => onPickNextStep?.(name)}
+        />
+      );
+    case "ticketsGroup":
+      // 占位：agent D 后续替换为 TicketCard 列表
+      return (
+        <div
+          className="rounded mt-1.5 px-2.5 py-1.5 text-[11px]"
+          style={{
+            background: "var(--vscode-input-background)",
+            border: "1px solid var(--vscode-panel-border)",
+            color: "var(--vscode-descriptionForeground)",
+          }}
+        >
+          {field.tickets.length} tickets
+        </div>
+      );
+    case "executionRequests":
+      // 占位
+      return (
+        <div
+          className="rounded mt-1.5 px-2.5 py-1.5 text-[11px]"
+          style={{
+            background: "var(--vscode-input-background)",
+            border: "1px solid var(--vscode-panel-border)",
+            color: "var(--vscode-descriptionForeground)",
+          }}
+        >
+          {field.requests.length} execution requests
+        </div>
+      );
+    default:
+      return null;
+  }
+};
+
+// =====================================================================
 // 主组件：ConversationView
 // =====================================================================
 
@@ -402,13 +491,21 @@ const ConversationView = ({
   streamEvents,
   onValidate,
   onGenerate,
+  streamingFields,
+  onPickNextStep,
+  onAnswerInterview,
 }: Props) => {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // 新 turn 到达或流式更新时自动滚动到底部
+  // 新 turn 到达、流式更新或 streamingFields 增长时自动滚动到底部
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns.length, isStreaming, streamEvents.length]);
+  }, [
+    turns.length,
+    isStreaming,
+    streamEvents.length,
+    streamingFields?.length ?? 0,
+  ]);
 
   return (
     <div className="flex flex-col h-full">
@@ -422,6 +519,18 @@ const ConversationView = ({
           />
         ))}
         {isStreaming && <StreamingTurn events={streamEvents} />}
+        {streamingFields && streamingFields.length > 0 && (
+          <div className="w-full">
+            {streamingFields.map((field, idx) => (
+              <OrderedFieldRenderer
+                key={`field-${idx}`}
+                field={field}
+                onPickNextStep={onPickNextStep}
+                onAnswerInterview={onAnswerInterview}
+              />
+            ))}
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>

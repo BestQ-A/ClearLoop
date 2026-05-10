@@ -31,7 +31,7 @@ export function getWebviewContent(
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <meta http-equiv="Content-Security-Policy" content="${cspSource}">
-      <title>CodeSail</title>
+      <title>ClearLoop</title>
       <link href="${styleUri}" rel="stylesheet">
     </head>
     <body>

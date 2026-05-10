@@ -9,7 +9,7 @@ interface Props {
 }
 
 const agents = [
-  { id: "local", name: "Local (CodeSail)", icon: "⛵" },
+  { id: "local", name: "Local (ClearLoop)", icon: "⛵" },
   { id: "claude-code", name: "Claude Code", icon: "🤖" },
   { id: "codex", name: "Codex CLI", icon: "⚡" },
   { id: "cline", name: "Cline", icon: "🔧" },

@@ -1,6 +1,6 @@
+use crate::protocol::mcp::*;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::protocol::mcp::*;
 
 pub struct McpManager {
     servers: Arc<RwLock<Vec<McpServerConfig>>>,
@@ -38,11 +38,13 @@ impl McpManager {
 
     pub async fn server_status(&self, id: &str) -> Result<McpServerStatus, String> {
         let servers = self.servers.read().await;
-        let server = servers.iter().find(|s| s.id == id)
+        let server = servers
+            .iter()
+            .find(|s| s.id == id)
             .ok_or_else(|| format!("Server '{}' not found", id))?;
         Ok(McpServerStatus {
             id: server.id.clone(),
-            running: !server.disabled,  // simplified — not actually launching for MVP
+            running: !server.disabled, // simplified — not actually launching for MVP
             error: None,
             tools_count: 0,
         })
@@ -50,7 +52,9 @@ impl McpManager {
 
     pub async fn toggle_server(&self, id: &str, enabled: bool) -> Result<(), String> {
         let mut servers = self.servers.write().await;
-        let server = servers.iter_mut().find(|s| s.id == id)
+        let server = servers
+            .iter_mut()
+            .find(|s| s.id == id)
             .ok_or_else(|| format!("Server '{}' not found", id))?;
         server.disabled = !enabled;
         Ok(())

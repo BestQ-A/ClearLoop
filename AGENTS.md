@@ -1,0 +1,65 @@
+# ClearLoop Project Instructions
+
+## Project Boundary
+
+ClearLoop is the user-facing VS Code product for Clear AI.
+
+It is a sibling project of BestQ-A:
+
+```text
+E:\1_agents_space\9_AGI\BestQ-A   # reasoning / memory / causal core
+E:\1_agents_space\9_AGI\ClearLoop  # VS Code extension / local backend / agent UI
+```
+
+Do not treat this repository as an embedded BestQ-A subtree. Cross-project behavior should go through explicit contracts such as CLI commands, MCP tools, or `.bestqa/agent-runs` records.
+
+## Product Direction
+
+Build a local-first VS Code control plane that makes AI coding work visible, auditable, and reusable.
+
+The central product loop is:
+
+```text
+task -> explicit plan -> controlled agent run -> captured evidence -> verification -> memory gate
+```
+
+Hidden model chain-of-thought must not be persisted or displayed as product evidence. Persist structured summaries, tool events, prompts, commands, logs, diffs, verification outputs, and explicit user decisions.
+
+## Local Commands
+
+Use these targeted checks before claiming a ClearLoop change works:
+
+```powershell
+npm run compile
+```
+
+```powershell
+npm run build
+```
+
+```powershell
+cd codesail-server
+cargo test
+```
+
+```powershell
+cd webview-ui
+npm run build
+```
+
+For a minimal backend smoke, send JSON-RPC to `codesail-server` and verify that `handoff` creates:
+
+```text
+.bestqa/agent-runs/<run>/handoff.md
+.bestqa/agent-runs/<run>/manifest.json
+.bestqa/agent-runs/<run>/README.md
+.bestqa/agent-runs/<run>/result.md
+```
+
+## Engineering Rules
+
+- Keep UI, extension host, Rust backend, and webview concerns separated.
+- Do not claim the extension runtime works from `npm run build` alone; activation and server startup are separate evidence.
+- Preserve the current dirty worktree. Do not delete generated VSIX/database/cache files unless the user explicitly asks for cleanup.
+- When adding agent execution features, prefer a dry-run or handoff scaffold before automatic file mutation.
+- Record status honestly: `WAITING_FOR_EXECUTION` means a handoff exists; it is not the same as completed agent work.

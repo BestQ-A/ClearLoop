@@ -8,7 +8,16 @@ interface Props {
   onBack?: () => void;
 }
 
-type ProviderMode = "local" | "remote";
+type ProviderMode = "local" | "codex" | "remote";
+
+const CODEX_MODELS = [
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex",
+  "gpt-5.3-codex-spark",
+  "gpt-5.2",
+];
 
 const LANGUAGE_VALUES = ["en", "zh-CN", "ja", "ko", "es", "fr", "de"] as const;
 
@@ -16,6 +25,7 @@ const OUTPUT_LEVELS = ["error", "warn", "info", "debug"];
 
 const AGENTS = [
   "claude-code",
+  "codex-cli",
   "cursor",
   "copilot",
   "cline",
@@ -28,9 +38,10 @@ const AGENTS = [
 
 const SettingsPanel = ({ providers, sendToExtension }: Props) => {
   const { t } = useI18n();
-  const [mode, setMode] = useState<ProviderMode>("local");
-  const [endpoint, setEndpoint] = useState("http://localhost:11434");
-  const [model, setModel] = useState("qwen2.5-coder");
+  // 默认 codex：复用用户已登录的 ChatGPT 配额，无需 endpoint/apiKey
+  const [mode, setMode] = useState<ProviderMode>("codex");
+  const [endpoint, setEndpoint] = useState("");
+  const [model, setModel] = useState("gpt-5.5");
   const [apiKey, setApiKey] = useState("");
 
   const [language, setLanguage] = useState("en");
@@ -45,11 +56,14 @@ const SettingsPanel = ({ providers, sendToExtension }: Props) => {
   const localProvider = providers.find((p) => p.is_local);
 
   const handleSave = () => {
+    const provider =
+      mode === "local" ? "ollama" : mode === "codex" ? "codex" : "openai";
     sendToExtension("setProvider", {
-      provider: mode === "local" ? "ollama" : "openai",
+      provider,
       model,
-      endpoint,
-      apiKey: apiKey || undefined,
+      // codex 不需要 endpoint / apiKey，传空让后端用默认值
+      endpoint: mode === "codex" ? undefined : endpoint,
+      apiKey: mode === "codex" ? undefined : apiKey || undefined,
       language,
       outputLevel,
       streaming,
@@ -65,6 +79,10 @@ const SettingsPanel = ({ providers, sendToExtension }: Props) => {
     if (next === "local") {
       setEndpoint("http://localhost:11434");
       setModel("qwen2.5-coder");
+      setApiKey("");
+    } else if (next === "codex") {
+      setEndpoint("");
+      setModel("gpt-5.5");
       setApiKey("");
     } else {
       setEndpoint("https://api.openai.com");
@@ -99,7 +117,7 @@ const SettingsPanel = ({ providers, sendToExtension }: Props) => {
 
           {/* 模式切换 */}
           <div className="flex rounded overflow-hidden border border-[var(--vscode-input-border)] mb-3">
-            {(["local", "remote"] as const).map((m) => (
+            {(["local", "codex", "remote"] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => handleModeSwitch(m)}
@@ -109,20 +127,27 @@ const SettingsPanel = ({ providers, sendToExtension }: Props) => {
                     : "bg-[var(--vscode-input-background)] text-[var(--vscode-descriptionForeground)] hover:text-[var(--vscode-foreground)]"
                 }`}
               >
-                {m === "local" ? t.settingsModeLocal : t.settingsModeRemote}
+                {m === "local"
+                  ? t.settingsModeLocal
+                  : m === "codex"
+                  ? "Codex"
+                  : t.settingsModeRemote}
               </button>
             ))}
           </div>
 
-          {/* Endpoint */}
-          <label className={fieldLabel}>{t.settingsEndpoint}</label>
-          <input
-            value={endpoint}
-            onChange={(e) => setEndpoint(e.target.value)}
-            className={`${inputBase} mb-2`}
-          />
+          {/* Endpoint：codex 模式不需要 endpoint */}
+          {mode !== "codex" && (
+            <>
+              <label className={fieldLabel}>{t.settingsEndpoint}</label>
+              <input
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                className={`${inputBase} mb-2`}
+              />
+            </>
+          )}
 
-          {/* 本地模式：模型下拉 */}
           {mode === "local" ? (
             <>
               <label className={fieldLabel}>{t.settingsModel}</label>
@@ -146,6 +171,26 @@ const SettingsPanel = ({ providers, sendToExtension }: Props) => {
                   className={inputBase}
                 />
               )}
+            </>
+          ) : mode === "codex" ? (
+            <>
+              {/* Codex 模式：复用 codex CLI 已登录的 ChatGPT 配额 */}
+              <div className="text-[10px] text-[var(--vscode-descriptionForeground)] mb-2 leading-relaxed">
+                复用本机 codex CLI 已登录的 ChatGPT 订阅额度。需先在终端跑过{" "}
+                <code>codex login</code>。
+              </div>
+              <label className={fieldLabel}>{t.settingsModel}</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className={selectBase}
+              >
+                {CODEX_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </>
           ) : (
             <>

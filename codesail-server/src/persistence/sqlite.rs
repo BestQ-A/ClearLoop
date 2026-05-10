@@ -155,16 +155,24 @@ impl SqliteStore {
         let conn = self.conn.lock().map_err(|e| format!("锁获取失败: {}", e))?;
 
         // Traycer Epic.status 是裸 string（可空），直接绑定 Option<String>
-        let specs_json = serde_json::to_string(&epic.specs)
-            .map_err(|e| format!("序列化 specs 失败: {}", e))?;
+        let specs_json =
+            serde_json::to_string(&epic.specs).map_err(|e| format!("序列化 specs 失败: {}", e))?;
         let tickets_json = serde_json::to_string(&epic.tickets)
             .map_err(|e| format!("序列化 tickets 失败: {}", e))?;
         let executions_json = serde_json::to_string(&epic.executions)
             .map_err(|e| format!("序列化 executions 失败: {}", e))?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO epics (id, title, description, status, specs_json, tickets_json, executions_json, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO epics (id, title, description, status, specs_json, tickets_json, executions_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                description = excluded.description,
+                status = excluded.status,
+                specs_json = excluded.specs_json,
+                tickets_json = excluded.tickets_json,
+                executions_json = excluded.executions_json,
+                updated_at = excluded.updated_at",
             params![
                 epic.id.0,
                 epic.title,
@@ -207,7 +215,17 @@ impl SqliteStore {
             .map_err(|e| format!("查询 epic 失败: {}", e))?;
 
         match result {
-            Some((id_str, title, description, status, specs_json, tickets_json, executions_json, created_at, updated_at)) => {
+            Some((
+                id_str,
+                title,
+                description,
+                status,
+                specs_json,
+                tickets_json,
+                executions_json,
+                created_at,
+                updated_at,
+            )) => {
                 let specs: Vec<Spec> = serde_json::from_str(&specs_json).unwrap_or_default();
                 let tickets: Vec<Ticket> = serde_json::from_str(&tickets_json).unwrap_or_default();
                 let executions: Vec<Execution> =
@@ -249,8 +267,7 @@ impl SqliteStore {
                 let updated_at: String = row.get(8)?;
 
                 let specs: Vec<Spec> = serde_json::from_str(&specs_json).unwrap_or_default();
-                let tickets: Vec<Ticket> =
-                    serde_json::from_str(&tickets_json).unwrap_or_default();
+                let tickets: Vec<Ticket> = serde_json::from_str(&tickets_json).unwrap_or_default();
                 let executions: Vec<Execution> =
                     serde_json::from_str(&executions_json).unwrap_or_default();
 
@@ -336,7 +353,16 @@ impl SqliteStore {
             .map_err(|e| format!("查询 spec 失败: {}", e))?;
 
         match result {
-            Some((id_str, epic_id, title, content, spec_type_str, status_str, created_at, updated_at)) => {
+            Some((
+                id_str,
+                epic_id,
+                title,
+                content,
+                spec_type_str,
+                status_str,
+                created_at,
+                updated_at,
+            )) => {
                 let spec_type = serde_json::from_str(&format!("\"{}\"", spec_type_str))
                     .unwrap_or(SpecType::Custom);
                 let status = serde_json::from_str(&format!("\"{}\"", status_str))
@@ -419,8 +445,17 @@ impl SqliteStore {
             .map_err(|e| format!("序列化 spec_refs 失败: {}", e))?;
 
         conn.execute(
-            "INSERT OR REPLACE INTO tickets (id, epic_id, title, description, status, assignee, is_streaming, spec_refs_json, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO tickets (id, epic_id, title, description, status, assignee, is_streaming, spec_refs_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(id) DO UPDATE SET
+                epic_id = excluded.epic_id,
+                title = excluded.title,
+                description = excluded.description,
+                status = excluded.status,
+                assignee = excluded.assignee,
+                is_streaming = excluded.is_streaming,
+                spec_refs_json = excluded.spec_refs_json,
+                updated_at = excluded.updated_at",
             params![
                 ticket.id.0,
                 ticket.epic_id.0,
@@ -465,7 +500,18 @@ impl SqliteStore {
             .map_err(|e| format!("查询 ticket 失败: {}", e))?;
 
         match result {
-            Some((id_str, epic_id, title, description, status_str, assignee, is_streaming, spec_refs_json, created_at, updated_at)) => {
+            Some((
+                id_str,
+                epic_id,
+                title,
+                description,
+                status_str,
+                assignee,
+                is_streaming,
+                spec_refs_json,
+                created_at,
+                updated_at,
+            )) => {
                 let status = serde_json::from_str(&format!("\"{}\"", status_str))
                     .unwrap_or(TicketStatus::Todo);
                 let spec_refs: Vec<SpecId> =
@@ -545,8 +591,8 @@ impl SqliteStore {
     pub fn save_execution(&self, exec: &Execution) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| format!("锁获取失败: {}", e))?;
 
-        let agent_str = serde_json::to_string(&exec.agent)
-            .map_err(|e| format!("序列化 agent 失败: {}", e))?;
+        let agent_str =
+            serde_json::to_string(&exec.agent).map_err(|e| format!("序列化 agent 失败: {}", e))?;
         let agent_str = agent_str.trim_matches('"');
 
         let status_str = serde_json::to_string(&exec.status)
@@ -562,8 +608,18 @@ impl SqliteStore {
             .map(|c| serde_json::to_string(c).unwrap_or_default());
 
         conn.execute(
-            "INSERT OR REPLACE INTO executions (id, epic_id, ticket_id, agent, status, plan_snapshot, verification_threads_json, commit_metadata_json, started_at, completed_at, duration_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO executions (id, epic_id, ticket_id, agent, status, plan_snapshot, verification_threads_json, commit_metadata_json, started_at, completed_at, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                epic_id = excluded.epic_id,
+                ticket_id = excluded.ticket_id,
+                agent = excluded.agent,
+                status = excluded.status,
+                plan_snapshot = excluded.plan_snapshot,
+                verification_threads_json = excluded.verification_threads_json,
+                commit_metadata_json = excluded.commit_metadata_json,
+                completed_at = excluded.completed_at,
+                duration_ms = excluded.duration_ms",
             params![
                 exec.id.0,
                 exec.epic_id.0,
@@ -610,15 +666,27 @@ impl SqliteStore {
             .map_err(|e| format!("查询 execution 失败: {}", e))?;
 
         match result {
-            Some((id_str, epic_id, ticket_id, agent_str, status_str, plan_snapshot, vthreads_json, commit_json, started_at, completed_at, duration_ms)) => {
+            Some((
+                id_str,
+                epic_id,
+                ticket_id,
+                agent_str,
+                status_str,
+                plan_snapshot,
+                vthreads_json,
+                commit_json,
+                started_at,
+                completed_at,
+                duration_ms,
+            )) => {
                 let agent = serde_json::from_str(&format!("\"{}\"", agent_str))
                     .unwrap_or(ExecutionAgent::ClaudeCode);
                 let status = serde_json::from_str(&format!("\"{}\"", status_str))
                     .unwrap_or(ExecutionStatus::NotStarted);
                 let verification_threads: Vec<String> =
                     serde_json::from_str(&vthreads_json).unwrap_or_default();
-                let commit_metadata: Option<CommitMetadata> = commit_json
-                    .and_then(|j| serde_json::from_str(&j).ok());
+                let commit_metadata: Option<CommitMetadata> =
+                    commit_json.and_then(|j| serde_json::from_str(&j).ok());
 
                 Ok(Some(Execution {
                     id: ExecutionId(id_str),
@@ -726,7 +794,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_verification_threads(&self, plan_id: &str) -> Result<Vec<VerificationThread>, String> {
+    pub fn get_verification_threads(
+        &self,
+        plan_id: &str,
+    ) -> Result<Vec<VerificationThread>, String> {
         let conn = self.conn.lock().map_err(|e| format!("锁获取失败: {}", e))?;
 
         let mut stmt = conn

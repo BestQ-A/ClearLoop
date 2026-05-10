@@ -438,7 +438,7 @@ const en = {
   commonBack: "Back",
 
   // ── welcome.* (legacy) ────────────────────────────────
-  welcomeTitle: "Welcome to CodeSail",
+  welcomeTitle: "Welcome to ClearLoop",
   welcomeDesc: "This extension is free to use and requires Ollama with the",
   welcomeModel: "model to function.",
   setupTitle: "Setup Instructions:",

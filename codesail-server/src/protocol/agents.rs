@@ -61,6 +61,12 @@ pub struct HandoffResult {
     pub execution_id: String,
     pub status: ExecutionStatus,
     pub files_changed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit_sha: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

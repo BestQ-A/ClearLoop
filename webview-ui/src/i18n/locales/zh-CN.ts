@@ -410,7 +410,7 @@ const zhCN: Translations = {
   commonBack: "返回",
 
   // welcome (legacy)
-  welcomeTitle: "欢迎使用 CodeSail",
+  welcomeTitle: "欢迎使用 ClearLoop",
   welcomeDesc: "本扩展免费使用，需要本地运行 Ollama 并加载",
   welcomeModel: "模型。",
   setupTitle: "安装步骤：",

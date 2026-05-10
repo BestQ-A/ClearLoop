@@ -70,7 +70,7 @@ const ChatInput = ({
     editorProps: {
       attributes: {
         class:
-          "tiptap-editor min-h-[60px] max-h-[40vh] overflow-y-auto px-3 py-2 outline-none text-[var(--traycer-font-size-body)] leading-snug",
+          "tiptap-editor min-h-[34px] max-h-[40vh] overflow-y-auto px-3 py-2 outline-none text-[var(--traycer-font-size-body)] leading-snug",
       },
       handleKeyDown: (_view, event) => {
         // Enter 发送 / Shift+Enter 换行；suggestion plugin 已优先消费 Enter（见 SlashCommandList/MentionList）
@@ -150,10 +150,9 @@ const ChatInput = ({
   }, [editor]);
 
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2">
-      {/* 已附加文件 chip 行 */}
+    <div className="flex flex-col gap-1.5 px-0 py-0">
       {selectedFiles.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 px-1">
           {selectedFiles.map((f) => (
             <span
               key={f.path}
@@ -179,83 +178,81 @@ const ChatInput = ({
         </div>
       )}
 
-      {/* TipTap editor 容器 */}
       <section
-        className="w-full rounded-md"
+        className="w-full flex flex-col gap-y-1 overflow-hidden rounded-md bg-[var(--vscode-editor-background)]"
         style={{
-          backgroundColor: "var(--vscode-input-background)",
-          border: "1px solid var(--vscode-input-border, transparent)",
+          border: "1px solid var(--border)",
         }}
       >
         <EditorContent editor={editor} />
-      </section>
 
-      {/* 工具栏 + 发送按钮 */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7 rounded-md"
-            title={t.chatAttachFile}
-            aria-label={t.chatAttachFile}
-            onClick={() => editor?.chain().focus().insertContent("@").run()}
-          >
-            <Paperclip className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7 rounded-md"
-            title={t.chatMentionFile}
-            aria-label={t.chatMentionFile}
-            onClick={() => editor?.chain().focus().insertContent("@").run()}
-          >
-            <AtSign className="size-4" />
-          </Button>
+        <div className="flex min-w-0 max-w-full items-center justify-between gap-1.5 px-1.5 pb-1.5">
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 rounded-md"
+              title={t.chatAttachFile}
+              aria-label={t.chatAttachFile}
+              onClick={() => editor?.chain().focus().insertContent("@").run()}
+            >
+              <Paperclip className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 rounded-md"
+              title={t.chatMentionFile}
+              aria-label={t.chatMentionFile}
+              onClick={() => editor?.chain().focus().insertContent("@").run()}
+            >
+              <AtSign className="size-4" />
+            </Button>
+          </div>
+
+          <div className="flex min-w-0 max-w-full items-center justify-end gap-1.5">
+            {isAborting ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="ml-auto group rounded-full"
+                disabled
+                aria-label={t.chatStopping}
+                title={t.chatStopping}
+              >
+                <Loader2 className="w-4 h-4 animate-spin" />
+              </Button>
+            ) : isLoading ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="ml-auto group rounded-full"
+                onClick={() => onAbort?.()}
+                aria-label={t.chatStop}
+                title={t.chatStop}
+              >
+                <Square className="w-4 h-4 shrink-0 group-hover:text-red-600" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="default"
+                size="icon"
+                className="ml-auto rounded-full border border-border"
+                onClick={submit}
+                aria-label={t.chatSend}
+                title={t.chatSend}
+              >
+                <ArrowUp className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
         </div>
-
-        {/* Send 按钮三态：aborting > loading > idle */}
-        {isAborting ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="rounded-full"
-            disabled
-            aria-label={t.chatStopping}
-            title={t.chatStopping}
-          >
-            <Loader2 className="size-4 animate-spin" />
-          </Button>
-        ) : isLoading ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="rounded-full"
-            onClick={() => onAbort?.()}
-            aria-label={t.chatStop}
-            title={t.chatStop}
-          >
-            <Square className="size-4" />
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="default"
-            size="icon"
-            className="rounded-full border border-[var(--vscode-panel-border,transparent)]"
-            onClick={submit}
-            aria-label={t.chatSend}
-            title={t.chatSend}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
-        )}
-      </div>
+      </section>
     </div>
   );
 };
