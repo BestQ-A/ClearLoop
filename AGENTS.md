@@ -50,8 +50,12 @@ npm run build
 For a minimal backend smoke, send JSON-RPC to `codesail-server` and verify that `handoff` creates:
 
 ```text
-.bestqa/agent-runs/<run>/handoff.md
 .bestqa/agent-runs/<run>/manifest.json
+.bestqa/agent-runs/<run>/handoff.md
+.bestqa/agent-runs/<run>/evidence.jsonl
+.bestqa/agent-runs/<run>/commands.jsonl
+.bestqa/agent-runs/<run>/changes.json
+.bestqa/agent-runs/<run>/verification.md
 .bestqa/agent-runs/<run>/README.md
 .bestqa/agent-runs/<run>/result.md
 ```

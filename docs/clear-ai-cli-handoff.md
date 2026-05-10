@@ -6,8 +6,12 @@ It creates a durable handoff directory that can be used by Codex CLI, Claude Cod
 
 ```text
 <workspace>/.bestqa/agent-runs/<timestamp-agent-execution>/
-  handoff.md
   manifest.json
+  handoff.md
+  evidence.jsonl
+  commands.jsonl
+  changes.json
+  verification.md
   README.md
   result.md
 ```
@@ -25,7 +29,7 @@ The extension will:
 - ask for a task;
 - read the active editor as bounded context when one is open;
 - call the local Rust server through JSON-RPC `handoff`;
-- write the handoff scaffold under the current workspace;
+- write the run ledger v1 scaffold under the current workspace;
 - open `handoff.md` for inspection.
 
 ## Why This Exists
@@ -43,6 +47,13 @@ task -> context -> hypothesis -> plan -> execution evidence -> verification -> m
 ```
 
 This scaffold keeps the current product honest. It does not claim the agent has executed code when it has only created a prompt bundle. The status is `WAITING_FOR_EXECUTION` until a human or a later runner explicitly invokes the CLI and records the result.
+
+Run ledger v1 adds appendable evidence and command streams:
+
+- `evidence.jsonl` starts with `handoff_created`;
+- `commands.jsonl` starts with the suggested launch command;
+- `changes.json` is empty until an agent records changed files;
+- `verification.md` is the human-readable verification gate.
 
 ## Next Step
 

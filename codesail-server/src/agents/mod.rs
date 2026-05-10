@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde_json::json;
 
 use crate::protocol::agents::*;
 use crate::protocol::epic::ExecutionStatus;
@@ -251,22 +251,6 @@ struct HandoffScaffold {
     artifacts: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct HandoffManifest<'a> {
-    schema_version: u8,
-    execution_id: &'a str,
-    agent_id: &'a str,
-    agent_name: &'a str,
-    command: Option<&'a str>,
-    status: &'a str,
-    workspace_root: String,
-    run_dir: String,
-    handoff_path: String,
-    ticket_id: &'a str,
-    ticket_title: &'a str,
-    created_at: String,
-}
-
 fn create_cli_handoff_scaffold(
     execution_id: &str,
     payload: &HandoffPayload,
@@ -274,20 +258,36 @@ fn create_cli_handoff_scaffold(
     markdown: &str,
 ) -> Result<HandoffScaffold, String> {
     let workspace_root = workspace_root();
+    create_cli_handoff_scaffold_in(&workspace_root, execution_id, payload, agent, markdown)
+}
+
+fn create_cli_handoff_scaffold_in(
+    workspace_root: &Path,
+    execution_id: &str,
+    payload: &HandoffPayload,
+    agent: &AgentConfig,
+    markdown: &str,
+) -> Result<HandoffScaffold, String> {
+    let created_at = chrono::Utc::now();
+    let run_id = format!(
+        "{}-{}",
+        created_at.format("%Y%m%dT%H%M%SZ"),
+        safe_segment(&format!("{}-{}", agent.id, execution_id))
+    );
     let run_dir = workspace_root
         .join(".bestqa")
         .join("agent-runs")
-        .join(format!(
-            "{}-{}",
-            chrono::Utc::now().format("%Y%m%dT%H%M%SZ"),
-            safe_segment(&format!("{}-{}", agent.id, execution_id))
-        ));
+        .join(&run_id);
 
     fs::create_dir_all(&run_dir)
         .map_err(|e| format!("创建 handoff 目录失败 {}: {}", run_dir.display(), e))?;
 
     let handoff_path = run_dir.join("handoff.md");
     let manifest_path = run_dir.join("manifest.json");
+    let evidence_path = run_dir.join("evidence.jsonl");
+    let commands_path = run_dir.join("commands.jsonl");
+    let changes_path = run_dir.join("changes.json");
+    let verification_path = run_dir.join("verification.md");
     let readme_path = run_dir.join("README.md");
     let result_path = run_dir.join("result.md");
 
@@ -295,41 +295,121 @@ fn create_cli_handoff_scaffold(
         .map_err(|e| format!("写入 handoff.md 失败 {}: {}", handoff_path.display(), e))?;
 
     let command_hint = command_hint(agent, &handoff_path);
-    let manifest = HandoffManifest {
-        schema_version: 1,
-        execution_id,
-        agent_id: &agent.id,
-        agent_name: &agent.name,
-        command: agent.command.as_deref(),
-        status: "WAITING_FOR_EXECUTION",
-        workspace_root: workspace_root.display().to_string(),
-        run_dir: run_dir.display().to_string(),
-        handoff_path: handoff_path.display().to_string(),
-        ticket_id: &payload.ticket.id.0,
-        ticket_title: &payload.ticket.title,
-        created_at: chrono::Utc::now().to_rfc3339(),
-    };
+    let created_at_rfc3339 = created_at.to_rfc3339();
+    let manifest = json!({
+        "schema_version": "run-ledger.v1",
+        "run_id": run_id,
+        "execution_id": execution_id,
+        "workspace": workspace_root.display().to_string(),
+        "status": "WAITING_FOR_EXECUTION",
+        "agent": {
+            "id": agent.id,
+            "name": agent.name,
+            "kind": agent_kind(agent),
+            "command": agent.command,
+        },
+        "workflow": {
+            "stage": "handoff",
+            "baseline": "intent->clarification->plan->execution->verification->memory",
+        },
+        "task": {
+            "ticket_id": payload.ticket.id.0,
+            "epic_id": payload.ticket.epic_id.0,
+            "title": payload.ticket.title,
+            "intent": payload.ticket.description,
+            "acceptance": payload.verification_prompt.iter().collect::<Vec<_>>(),
+        },
+        "paths": {
+            "run_dir": run_dir.display().to_string(),
+            "handoff": handoff_path.display().to_string(),
+            "evidence": evidence_path.display().to_string(),
+            "commands": commands_path.display().to_string(),
+            "changes": changes_path.display().to_string(),
+            "verification": verification_path.display().to_string(),
+            "result": result_path.display().to_string(),
+        },
+        "memory_gate": {
+            "decision": "not_evaluated",
+            "reason": "No verification record yet",
+        },
+        "created_at": created_at_rfc3339,
+    });
     let manifest_json = serde_json::to_string_pretty(&manifest)
         .map_err(|e| format!("序列化 handoff manifest 失败: {}", e))?;
     fs::write(&manifest_path, manifest_json)
         .map_err(|e| format!("写入 manifest.json 失败 {}: {}", manifest_path.display(), e))?;
 
+    let evidence = json!({
+        "ts": created_at_rfc3339,
+        "type": "handoff_created",
+        "run_id": run_id,
+        "ticket_id": payload.ticket.id.0,
+        "agent_id": agent.id,
+        "status": "WAITING_FOR_EXECUTION",
+        "summary": "ClearLoop created a CLI handoff. Execution has not started.",
+    });
+    fs::write(&evidence_path, format!("{}\n", evidence)).map_err(|e| {
+        format!(
+            "写入 evidence.jsonl 失败 {}: {}",
+            evidence_path.display(),
+            e
+        )
+    })?;
+
+    let command_event = json!({
+        "ts": created_at_rfc3339,
+        "type": "suggested_command",
+        "agent_id": agent.id,
+        "command_hint": command_hint,
+        "status": "not_run",
+    });
+    fs::write(&commands_path, format!("{}\n", command_event)).map_err(|e| {
+        format!(
+            "写入 commands.jsonl 失败 {}: {}",
+            commands_path.display(),
+            e
+        )
+    })?;
+
+    let changes = json!({
+        "schema_version": "run-ledger.v1",
+        "status": "not_run",
+        "changed_files": [],
+        "note": "No file changes have been recorded. The CLI agent has not executed yet.",
+    });
+    let changes_json = serde_json::to_string_pretty(&changes)
+        .map_err(|e| format!("序列化 changes.json 失败: {}", e))?;
+    fs::write(&changes_path, changes_json)
+        .map_err(|e| format!("写入 changes.json 失败 {}: {}", changes_path.display(), e))?;
+
+    fs::write(&verification_path, render_verification_markdown(payload)).map_err(|e| {
+        format!(
+            "写入 verification.md 失败 {}: {}",
+            verification_path.display(),
+            e
+        )
+    })?;
+
     fs::write(&readme_path, render_scaffold_readme(agent, &command_hint))
         .map_err(|e| format!("写入 README.md 失败 {}: {}", readme_path.display(), e))?;
-    fs::write(
-        &result_path,
-        "# Agent Result\n\nPaste the CLI agent's summary, changed files, verification output, and follow-up risks here.\n",
-    )
-    .map_err(|e| format!("写入 result.md 失败 {}: {}", result_path.display(), e))?;
+    fs::write(&result_path, render_result_markdown())
+        .map_err(|e| format!("写入 result.md 失败 {}: {}", result_path.display(), e))?;
+
+    let artifacts = vec![
+        handoff_path.display().to_string(),
+        manifest_path.display().to_string(),
+        evidence_path.display().to_string(),
+        commands_path.display().to_string(),
+        changes_path.display().to_string(),
+        verification_path.display().to_string(),
+        readme_path.display().to_string(),
+        result_path.display().to_string(),
+    ];
 
     Ok(HandoffScaffold {
         handoff_path,
         command_hint,
-        artifacts: vec![
-            manifest_path.display().to_string(),
-            readme_path.display().to_string(),
-            result_path.display().to_string(),
-        ],
+        artifacts,
     })
 }
 
@@ -351,19 +431,67 @@ fn command_hint(agent: &AgentConfig, handoff_path: &Path) -> String {
     )
 }
 
+fn agent_kind(agent: &AgentConfig) -> &'static str {
+    if agent.command.is_some() {
+        "cli"
+    } else if agent.endpoint.is_some() {
+        "api"
+    } else {
+        "extension"
+    }
+}
+
 fn render_scaffold_readme(agent: &AgentConfig, command_hint: &str) -> String {
     format!(
         "# CLI Agent Handoff\n\n\
 This directory is a durable handoff scaffold for `{}`.\n\n\
 ## Files\n\n\
+- `manifest.json` — machine-readable run index.\n\
 - `handoff.md` — prompt and evidence bundle for the CLI agent.\n\
-- `manifest.json` — machine-readable execution metadata.\n\
-- `result.md` — place to record the CLI result and verification evidence.\n\n\
+- `evidence.jsonl` — append-only evidence events.\n\
+- `commands.jsonl` — suggested or executed command events.\n\
+- `changes.json` — changed-file summary, empty until execution.\n\
+- `verification.md` — verification prompt, commands, and pass/fail notes.\n\
+- `result.md` — final result summary, changed files, and residual risks.\n\n\
 ## Launch\n\n\
 {}\n\n\
 Keep the result explicit: changed files, commands run, logs, remaining risks.\n",
         agent.name, command_hint
     )
+}
+
+fn render_verification_markdown(payload: &HandoffPayload) -> String {
+    let mut md = String::new();
+    md.push_str("# Verification\n\n");
+    md.push_str("Status: `not_run`\n\n");
+    md.push_str("## Acceptance Target\n\n");
+    if let Some(prompt) = &payload.verification_prompt {
+        md.push_str(prompt);
+        md.push_str("\n\n");
+    } else {
+        md.push_str("No explicit verification prompt was provided. Record the command, observable output, or human acceptance used to verify this run.\n\n");
+    }
+    md.push_str("## Commands\n\n");
+    md.push_str("- [ ] Add verification command and result here.\n\n");
+    md.push_str("## Residual Risk\n\n");
+    md.push_str("- Not evaluated yet.\n");
+    md
+}
+
+fn render_result_markdown() -> &'static str {
+    "# Agent Result\n\n\
+Status: `WAITING_FOR_EXECUTION`\n\n\
+## Summary\n\n\
+Record the CLI agent result here after execution.\n\n\
+## Changed Files\n\n\
+- None recorded yet.\n\n\
+## Commands Run\n\n\
+- None recorded yet.\n\n\
+## Verification\n\n\
+- Not run yet. Update `verification.md` and append events to `evidence.jsonl` / `commands.jsonl`.\n\n\
+## Memory Gate\n\n\
+Decision: `not_evaluated`\n\n\
+Reason: No verified reusable lesson has been extracted.\n"
 }
 
 fn safe_segment(value: &str) -> String {
@@ -514,5 +642,68 @@ mod tests {
         assert!(!md.contains("Context Files"));
         // 没有验证提示时不应出现 Verification Prompt 节
         assert!(!md.contains("Verification Prompt"));
+    }
+
+    #[test]
+    fn test_create_cli_handoff_scaffold_writes_run_ledger_v1_files() {
+        let orchestrator = AgentOrchestrator::new();
+        let payload = HandoffPayload {
+            ticket: Ticket {
+                id: TicketId("t-ledger".into()),
+                epic_id: EpicId("e-ledger".into()),
+                title: "Run ledger smoke".into(),
+                description: "Create a durable run ledger scaffold".into(),
+                status: TicketStatus::Todo,
+                assignee: Some("codex-cli".into()),
+                is_streaming: false,
+                spec_refs: vec![],
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            plan_snapshot: "1. Create scaffold\n2. Verify files".into(),
+            context_files: vec![],
+            instructions: "Create the handoff only; do not execute.".into(),
+            verification_prompt: Some("All run ledger v1 files must exist.".into()),
+        };
+        let agent = orchestrator.get_agent("codex-cli").unwrap();
+        let workspace =
+            std::env::temp_dir().join(format!("clearloop-ledger-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let markdown = orchestrator.format_handoff_markdown(&payload);
+        let scaffold =
+            create_cli_handoff_scaffold_in(&workspace, "exec-ledger", &payload, agent, &markdown)
+                .unwrap();
+        let run_dir = scaffold.handoff_path.parent().unwrap();
+
+        for name in [
+            "manifest.json",
+            "handoff.md",
+            "evidence.jsonl",
+            "commands.jsonl",
+            "changes.json",
+            "verification.md",
+            "README.md",
+            "result.md",
+        ] {
+            assert!(run_dir.join(name).exists(), "{} should exist", name);
+        }
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["schema_version"], "run-ledger.v1");
+        assert_eq!(manifest["status"], "WAITING_FOR_EXECUTION");
+        assert_eq!(manifest["agent"]["id"], "codex-cli");
+        assert_eq!(manifest["task"]["ticket_id"], "t-ledger");
+        assert_eq!(manifest["memory_gate"]["decision"], "not_evaluated");
+
+        let evidence = std::fs::read_to_string(run_dir.join("evidence.jsonl")).unwrap();
+        assert!(evidence.contains("\"type\":\"handoff_created\""));
+        let commands = std::fs::read_to_string(run_dir.join("commands.jsonl")).unwrap();
+        assert!(commands.contains("\"type\":\"suggested_command\""));
+        assert_eq!(scaffold.artifacts.len(), 8);
+
+        std::fs::remove_dir_all(&workspace).unwrap();
     }
 }
