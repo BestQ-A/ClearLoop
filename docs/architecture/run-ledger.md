@@ -20,6 +20,8 @@ Every meaningful agent run should answer:
 - How was the result verified?
 - Should anything be promoted into reusable memory?
 
+The ledger is deliberately raw enough to preserve evidence and structured enough to be refactored later. Session refactoring is the process that turns a completed run into smaller reusable assets.
+
 ## Storage Direction
 
 The first local format is file-based:
@@ -113,3 +115,19 @@ Memory promotion is allowed only when:
 - the evidence path is still available.
 
 This keeps ClearLoop from turning lucky correlations into permanent rules.
+
+## Session Refactoring Boundary
+
+The run ledger stores what happened. Session refactoring decides what can be reused.
+
+Do not write reusable lessons directly from an agent transcript. First normalize the transcript into ledger evidence, then extract reusable assets such as:
+
+- best questions;
+- best answers;
+- context filters;
+- causal hypotheses;
+- verification recipes;
+- reusable workflows;
+- failure patterns.
+
+This boundary keeps ClearLoop honest: a run can be useful without becoming a permanent rule.

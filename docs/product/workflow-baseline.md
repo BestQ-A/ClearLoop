@@ -26,6 +26,8 @@ intent
 
 The loop can be shorter for small work, but it should not lose its evidence boundary. A trivial edit may compress clarification, plan, and breakdown into one record. A risky change should expand review, verification, and memory gates.
 
+The run itself is not the final product. After a run finishes, ClearLoop should support session refactoring: extracting reusable questions, answers, plans, evidence paths, verification recipes, and causal patterns from the raw run. See [`session-refactoring.md`](session-refactoring.md).
+
 ## Stage Contracts
 
 | Stage | Purpose | Required record |
@@ -41,6 +43,7 @@ The loop can be shorter for small work, but it should not lose its evidence boun
 | `evidence` | Capture what actually happened | logs, diffs, screenshots, test output |
 | `verification` | Decide whether the result satisfies the target | commands, pass/fail, residual risk |
 | `memory_gate` | Decide whether the lesson is reusable | promote, reject, or keep local |
+| `session_refactoring` | Convert a one-off run into reusable assets | questions, answers, patterns, shortcuts |
 
 ## Product Rules
 

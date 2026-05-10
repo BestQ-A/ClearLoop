@@ -23,6 +23,7 @@ Core product documents:
 
 - [`docs/product/relevance-to-causality.md`](docs/product/relevance-to-causality.md)
 - [`docs/product/workflow-baseline.md`](docs/product/workflow-baseline.md)
+- [`docs/product/session-refactoring.md`](docs/product/session-refactoring.md)
 - [`docs/architecture/run-ledger.md`](docs/architecture/run-ledger.md)
 
 loom.com/share/752aa7884c304b609b71b37e75e8ab74
@@ -75,6 +76,7 @@ This is still early. The current backend binary remains `codesail-server` as an 
 
 - **CLI handoff scaffold**: create an auditable handoff for Codex CLI, Claude Code CLI, or another local agent.
 - **Explicit workflow baseline**: organize work as intent, clarification, plan, review, breakdown, execution, verification, and memory.
+- **Session refactoring**: turn one-off AI/CLI sessions into reusable questions, answers, plans, evidence, verification, and causal patterns.
 - **Run ledger direction**: capture task state, evidence, commands, outputs, diffs, verification, and memory gates as local records.
 - **VS Code control plane**: expose agent work through a human-facing sidebar instead of hiding it inside chat state.
 
