@@ -150,6 +150,10 @@ suite("ClearLoop CLI agent preflight", () => {
       commands.includes("clearLoop.promoteMemoryCandidate"),
       "clearLoop.promoteMemoryCandidate command should be registered"
     );
+    assert.ok(
+      commands.includes("clearLoop.openMemoryReviews"),
+      "clearLoop.openMemoryReviews command should be registered"
+    );
 
     const verifiedRunDir = await createRunLedger(workspaceRoot, `memory-smoke-${Date.now()}`);
     await vscode.commands.executeCommand<any>("clearLoop.verifyRunResult", {

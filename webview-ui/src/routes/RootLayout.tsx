@@ -269,6 +269,10 @@ export default function RootLayout() {
         case "mcp":
           navigate("/mcp");
           break;
+        case "memory":
+        case "memory-reviews":
+          navigate("/memory-reviews");
+          break;
         case "settings":
           navigate("/settings/prompt-template");
           break;
@@ -507,6 +511,7 @@ export default function RootLayout() {
           if (target === "settings") navigate("/settings/prompt-template");
           else if (target === "history") navigate("/history");
           else if (target === "mcp") navigate("/mcp");
+          else if (target === "memory" || target === "memory-reviews") navigate("/memory-reviews");
           else if (target === "notifications") navigate("/notifications");
           else if (target === "epic") navigate("/epic/chat/new");
           else navigate("/");
@@ -583,6 +588,7 @@ export default function RootLayout() {
     pathname.startsWith("/settings") ||
     pathname.startsWith("/history") ||
     pathname.startsWith("/mcp") ||
+    pathname.startsWith("/memory-reviews") ||
     pathname.startsWith("/notifications") ||
     pathname.startsWith("/task/kanban");
 
@@ -591,6 +597,7 @@ export default function RootLayout() {
       { id: "new-task", label: "New Task", category: "Action", shortcut: "Ctrl+N", action: handleClear },
       { id: "history", label: "Task History", category: "Nav", action: () => navigate("/history") },
       { id: "mcp", label: "Remote MCP Servers", category: "Nav", action: () => navigate("/mcp") },
+      { id: "memory-reviews", label: "Memory Reviews", category: "Nav", action: () => navigate("/memory-reviews") },
       { id: "notifications", label: "Notifications", category: "Nav", action: () => navigate("/notifications") },
       { id: "epic", label: "Open Epic View", category: "Nav", shortcut: "Ctrl+E", action: () => navigate("/epic/chat/new") },
       { id: "prompt-templates", label: "Prompt Templates", category: "Settings", action: () => navigate("/settings/prompt-template") },

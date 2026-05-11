@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import * as fs from "fs/promises";
+import * as path from "path";
 import { getWorkspaceFiles, readFile } from "../utils/FileOperations";
 import { createCodeAnalysisService } from "../services/CodeAnalysisService";
 import { RustClient } from "../rustclient/RustClient";
@@ -8,6 +10,200 @@ interface Message {
   command: string;
   data?: any;
   [key: string]: any;
+}
+
+type MemoryReviewDetail = {
+  path: string;
+  title: string;
+  createdAt: string;
+  sourceCandidate: string;
+  sourceRun: string;
+  decision: string;
+  acceptedBy: string;
+  humanReviewNote: string;
+  reusableClaim: string;
+  applicabilityConditions: string;
+  successFailureBoundary: string;
+  reviewChecklist: string;
+  sourceCandidateSnapshot: string;
+  raw: string;
+  updatedAt?: string;
+};
+
+function workspaceRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+  const relativePath = path.relative(parentPath, childPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function cleanFsPathInput(value: string): string {
+  return value.trim().replace(/^["']|["']$/g, "");
+}
+
+function extractBacktickField(markdown: string, label: string): string {
+  const prefix = `${label}:`;
+  for (const line of markdown.split(/\r?\n/)) {
+    if (!line.startsWith(prefix)) {
+      continue;
+    }
+    return line.match(/`([^`]+)`/)?.[1] || "";
+  }
+  return "";
+}
+
+function extractPlainField(markdown: string, label: string): string {
+  const prefix = `${label}:`;
+  for (const line of markdown.split(/\r?\n/)) {
+    if (line.startsWith(prefix)) {
+      return line.slice(prefix.length).trim();
+    }
+  }
+  return "";
+}
+
+function extractMarkdownSection(markdown: string, heading: string): string {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const headingLine = `## ${heading}`;
+  const start = lines.findIndex((line) => line.trim() === headingLine);
+  if (start < 0) {
+    return "";
+  }
+  const body: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index].startsWith("## ")) {
+      break;
+    }
+    body.push(lines[index]);
+  }
+  return body.join("\n").trim();
+}
+
+function relativeOrAbsolute(root: string, targetPath: string): string {
+  if (!targetPath.trim()) {
+    return "";
+  }
+  const relativePath = path.relative(root, targetPath);
+  return relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)
+    ? relativePath
+    : targetPath;
+}
+
+function normalizeWorkspacePath(root: string, value: string): string {
+  return path.normalize(path.isAbsolute(value) ? value : path.resolve(root, value));
+}
+
+function memoryReviewsRoot(root: string): string {
+  return path.join(root, ".bestqa", "memory-reviews");
+}
+
+function assertMemoryReviewPath(root: string, reviewPath: string): string {
+  const normalized = path.normalize(cleanFsPathInput(reviewPath));
+  const reviewRoot = memoryReviewsRoot(root);
+  if (!isPathInside(reviewRoot, normalized)) {
+    throw new Error("Review path is outside .bestqa/memory-reviews.");
+  }
+  return normalized;
+}
+
+function parseMemoryReview(markdown: string, reviewPath: string, root: string, updatedAt?: string): MemoryReviewDetail {
+  const sourceCandidate = extractBacktickField(markdown, "Source candidate");
+  const sourceRun = extractBacktickField(markdown, "Source run");
+  return {
+    path: reviewPath,
+    title: path.basename(reviewPath),
+    createdAt: extractPlainField(markdown, "Created at"),
+    sourceCandidate: sourceCandidate ? normalizeWorkspacePath(root, sourceCandidate) : "",
+    sourceRun: sourceRun ? normalizeWorkspacePath(root, sourceRun) : "",
+    decision: extractBacktickField(markdown, "Decision") || "pending",
+    acceptedBy: extractBacktickField(markdown, "Accepted by") || "TODO",
+    humanReviewNote: extractMarkdownSection(markdown, "Human Review Note"),
+    reusableClaim: extractMarkdownSection(markdown, "Reusable Claim"),
+    applicabilityConditions: extractMarkdownSection(markdown, "Applicability Conditions"),
+    successFailureBoundary: extractMarkdownSection(markdown, "Success And Failure Boundary"),
+    reviewChecklist: extractMarkdownSection(markdown, "Review Checklist"),
+    sourceCandidateSnapshot: extractMarkdownSection(markdown, "Source Candidate Snapshot"),
+    raw: markdown,
+    updatedAt,
+  };
+}
+
+function renderMemoryReview(detail: MemoryReviewDetail, root: string): string {
+  const createdAt = detail.createdAt || new Date().toISOString();
+  return [
+    "# Memory Promotion Review",
+    "",
+    "Status: `review_pending`",
+    "Schema: `clearloop.memory-review.v1`",
+    "",
+    `Created at: ${createdAt}`,
+    `Source candidate: \`${relativeOrAbsolute(root, detail.sourceCandidate)}\``,
+    `Source run: \`${relativeOrAbsolute(root, detail.sourceRun)}\``,
+    "",
+    "## Review Decision",
+    "",
+    `Decision: \`${detail.decision || "pending"}\``,
+    `Accepted by: \`${detail.acceptedBy || "TODO"}\``,
+    "",
+    "## Human Review Note",
+    "",
+    detail.humanReviewNote || "TODO: Explain why this should or should not become reusable memory.",
+    "",
+    "## Reusable Claim",
+    "",
+    detail.reusableClaim || "TODO: Write the reusable claim.",
+    "",
+    "## Applicability Conditions",
+    "",
+    detail.applicabilityConditions || "TODO: Define applicability conditions.",
+    "",
+    "## Success And Failure Boundary",
+    "",
+    detail.successFailureBoundary || "TODO: Define the success/failure boundary.",
+    "",
+    "## Review Checklist",
+    "",
+    detail.reviewChecklist || [
+      "- [ ] The claim is reusable beyond this one run.",
+      "- [ ] The verification evidence covers the intended behavior.",
+      "- [ ] Failure conditions are explicit enough to prevent overgeneralization.",
+      "- [ ] Residual risk is acceptable.",
+    ].join("\n"),
+    "",
+    "## Source Candidate Snapshot",
+    "",
+    detail.sourceCandidateSnapshot || "",
+    "",
+  ].join("\n");
+}
+
+async function listMemoryReviews(root: string): Promise<MemoryReviewDetail[]> {
+  const reviewRoot = memoryReviewsRoot(root);
+  let names: string[] = [];
+  try {
+    names = await fs.readdir(reviewRoot);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const reviews = await Promise.all(
+    names
+      .filter((name) => name.toLowerCase().endsWith(".md"))
+      .map(async (name) => {
+        const reviewPath = path.join(reviewRoot, name);
+        const [markdown, stat] = await Promise.all([
+          fs.readFile(reviewPath, "utf8"),
+          fs.stat(reviewPath),
+        ]);
+        return parseMemoryReview(markdown, reviewPath, root, stat.mtime.toISOString());
+      })
+  );
+  return reviews.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
 export function createMessageHandler(
@@ -435,6 +631,11 @@ export function createMessageHandler(
           break;
         }
 
+        case "openMemoryReviews": {
+          webview.postMessage({ command: "navigate", path: "/memory-reviews" });
+          break;
+        }
+
         case "openNotifications": {
           webview.postMessage({ command: "navigate", path: "/notifications" });
           break;
@@ -508,6 +709,76 @@ export function createMessageHandler(
         case "toggleMcpServer": {
           if (!rustClient) return;
           await rustClient.request("toggleMcpServer", message.data);
+          break;
+        }
+
+        // --- Memory review UI ---
+
+        case "memoryReviews.list": {
+          const root = workspaceRoot();
+          if (!root) {
+            webview.postMessage({ command: "memoryReviews.error", text: "Open a workspace before reviewing memory." });
+            break;
+          }
+          const reviews = await listMemoryReviews(root);
+          webview.postMessage({ command: "memoryReviews.list", data: reviews });
+          break;
+        }
+
+        case "memoryReviews.read": {
+          const root = workspaceRoot();
+          const reviewPath = message.data?.path;
+          if (!root || typeof reviewPath !== "string") {
+            webview.postMessage({ command: "memoryReviews.error", text: "Review path is required." });
+            break;
+          }
+          const safePath = assertMemoryReviewPath(root, reviewPath);
+          const [markdown, stat] = await Promise.all([
+            fs.readFile(safePath, "utf8"),
+            fs.stat(safePath),
+          ]);
+          webview.postMessage({
+            command: "memoryReviews.detail",
+            data: parseMemoryReview(markdown, safePath, root, stat.mtime.toISOString()),
+          });
+          break;
+        }
+
+        case "memoryReviews.save": {
+          const root = workspaceRoot();
+          const detail = message.data as MemoryReviewDetail | undefined;
+          if (!root || !detail?.path) {
+            webview.postMessage({ command: "memoryReviews.error", text: "Review detail is required." });
+            break;
+          }
+          const safePath = assertMemoryReviewPath(root, detail.path);
+          await fs.writeFile(safePath, renderMemoryReview({ ...detail, path: safePath }, root), "utf8");
+          const [markdown, stat] = await Promise.all([
+            fs.readFile(safePath, "utf8"),
+            fs.stat(safePath),
+          ]);
+          const saved = parseMemoryReview(markdown, safePath, root, stat.mtime.toISOString());
+          webview.postMessage({ command: "memoryReviews.saved", data: saved });
+          webview.postMessage({ command: "memoryReviews.detail", data: saved });
+          webview.postMessage({ command: "memoryReviews.list", data: await listMemoryReviews(root) });
+          break;
+        }
+
+        case "memoryReviews.promote": {
+          const root = workspaceRoot();
+          const reviewPath = message.data?.path;
+          if (!root || typeof reviewPath !== "string") {
+            webview.postMessage({ command: "memoryReviews.error", text: "Review path is required." });
+            break;
+          }
+          const safePath = assertMemoryReviewPath(root, reviewPath);
+          const result = await vscode.commands.executeCommand("clearLoop.promoteMemoryCandidate", {
+            reviewPath: safePath,
+            openMemory: false,
+            showOutput: false,
+          });
+          webview.postMessage({ command: "memoryReviews.promoted", data: result });
+          webview.postMessage({ command: "memoryReviews.list", data: await listMemoryReviews(root) });
           break;
         }
 

@@ -9,6 +9,7 @@ import ChatView from "./routes/task/ChatView";
 import HistoryView from "./routes/HistoryView";
 import EpicChatView from "./routes/EpicChatView";
 import McpView from "./routes/McpView";
+import MemoryReviewsView from "./routes/MemoryReviewsView";
 import NotificationsView from "./routes/NotificationsView";
 import SettingsLayout from "./routes/settings/SettingsLayout";
 import PromptTemplatesView from "./routes/settings/PromptTemplatesView";
@@ -34,6 +35,7 @@ export const router = createMemoryRouter([
       { path: "history", element: <HistoryView /> },
       { path: "epic/chat/:epicId", element: <EpicChatView /> },
       { path: "mcp", element: <McpView /> },
+      { path: "memory-reviews", element: <MemoryReviewsView /> },
       { path: "notifications", element: <NotificationsView /> },
       {
         path: "settings",

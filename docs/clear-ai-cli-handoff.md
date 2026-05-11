@@ -115,6 +115,14 @@ This writes a review Markdown file under:
 
 The review file keeps the source candidate and source run links, then exposes editable fields for `Decision`, `Accepted by`, `Human Review Note`, reusable claim, applicability conditions, and the success/failure boundary. A candidate should normally be promoted from this reviewed file, not directly from the raw candidate.
 
+For the visual path, use:
+
+```text
+ClearLoop: Open Memory Reviews
+```
+
+This opens the `/memory-reviews` webview route. The UI lists `.bestqa/memory-reviews/*.md`, edits the same review fields, saves back to the review file, and triggers promotion through `ClearLoop: Promote Memory Candidate`.
+
 To promote a reviewed candidate into local reusable memory, use:
 
 ```text
@@ -166,5 +174,4 @@ Run ledger v1 adds appendable evidence and command streams:
 After this smoke path is stable, the runner can tighten memory-gate and review UX:
 
 - export/import contracts for BestQ-A durable memory;
-- visual review UI for editing `.bestqa/memory-reviews/` records;
 - visible run timeline across preflight, start, capture, and verify.

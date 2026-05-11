@@ -132,9 +132,12 @@ For a minimal review-record smoke, verify the command palette exposes:
 
 ```text
 ClearLoop: Prepare Memory Review
+ClearLoop: Open Memory Reviews
 ```
 
 It should require an extracted `candidate_only` file under `.bestqa/memory-candidates/` and source evidence under `.bestqa/agent-runs/`, then create `.bestqa/memory-reviews/<timestamp>-<candidate>.md`. The review file must keep source links and editable fields for `Decision`, `Accepted by`, `Human Review Note`, reusable claim, applicability conditions, and success/failure boundary.
+
+The visual review route is `/memory-reviews`. It should list Markdown review records from `.bestqa/memory-reviews/`, allow editing the same review fields, save through the extension host file bridge, and promote only by invoking the existing `ClearLoop: Promote Memory Candidate` gate.
 
 For a minimal promotion smoke, verify the command palette exposes:
 
