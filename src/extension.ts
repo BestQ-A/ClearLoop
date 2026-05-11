@@ -400,6 +400,22 @@ type VerifyRunResultReport = {
   artifacts: string[];
 };
 
+type JsonObject = Record<string, any>;
+
+type MemoryCandidateOptions = {
+  runDir?: string;
+  openCandidate?: boolean;
+  showOutput?: boolean;
+};
+
+type MemoryCandidateReport = {
+  status: "created" | "blocked";
+  run_dir: string;
+  candidate_path?: string;
+  reasons: string[];
+  evidence_paths: string[];
+};
+
 function summarizeOutput(value: string | undefined, maxChars = 4000): string | undefined {
   if (!value) {
     return undefined;
@@ -423,6 +439,56 @@ async function runCheckStep(command: string, args: string[], cwd: string, timeou
       error: summarizeOutput(error.message || String(error)),
     };
   }
+}
+
+async function readJsonFile(filePath: string): Promise<JsonObject> {
+  return JSON.parse(await fs.readFile(filePath, "utf8"));
+}
+
+function unknownErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function readJsonlFile(filePath: string): Promise<JsonObject[]> {
+  const content = await fs.readFile(filePath, "utf8");
+  const records: JsonObject[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      records.push(JSON.parse(trimmed));
+    } catch {
+      records.push({
+        type: "unparsed_line",
+        text: trimmed,
+      });
+    }
+  }
+  return records;
+}
+
+function sanitizeFileSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "run";
+}
+
+function relativeOrAbsolute(workspaceRoot: string, targetPath: string): string {
+  const relativePath = path.relative(workspaceRoot, targetPath);
+  return relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)
+    ? relativePath
+    : targetPath;
+}
+
+function markdownExcerpt(value: string, maxChars = 5000): string {
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return "No content recorded.";
+  }
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `[tail ${maxChars} chars of ${normalized.length}]\n\n${normalized.slice(-maxChars)}`;
 }
 
 function runShellCommandCapture(command: string, cwd: string, timeoutMs: number): Promise<CommandCapture> {
@@ -1025,6 +1091,246 @@ async function verifyRunResult(options?: VerifyRunResultOptions): Promise<Verify
   };
 }
 
+function renderMemoryCandidateMarkdown(params: {
+  runDir: string;
+  workspaceRoot: string;
+  manifest: JsonObject;
+  resultMd: string;
+  verificationMd: string;
+  evidenceEvents: JsonObject[];
+  commands: JsonObject[];
+  changes: JsonObject;
+  evidencePaths: string[];
+}): string {
+  const runId = params.manifest.run_id || path.basename(params.runDir);
+  const memoryGate = params.manifest.memory_gate || {};
+  const changedFiles = Array.isArray(params.changes.changed_files)
+    ? params.changes.changed_files
+    : [];
+  const commandLines = params.commands
+    .filter((record) => record.type === "command_recorded")
+    .map((record) => {
+      const status = record.status || "unknown";
+      const outputPath = record.output_path ? `; output: ${record.output_path}` : "";
+      return `- \`${record.command || "unknown command"}\` -> \`${status}\`${outputPath}`;
+    });
+  const eventLines = params.evidenceEvents.map((record) => {
+    const timestamp = record.timestamp ? ` at ${record.timestamp}` : "";
+    return `- \`${record.type || "unknown_event"}\`${timestamp}`;
+  });
+
+  return [
+    "# Memory Candidate",
+    "",
+    "Status: `candidate_only`",
+    "",
+    `Source run: \`${params.runDir}\``,
+    `Run id: \`${runId}\``,
+    `Created at: ${new Date().toISOString()}`,
+    `Run status: \`${params.manifest.status || "unknown"}\``,
+    `Memory gate: \`${memoryGate.decision || "not_recorded"}\``,
+    "",
+    "## Reusable Claim",
+    "",
+    "This is a candidate, not durable memory. A human must decide whether the lesson is broadly reusable.",
+    "",
+    "## Applicability Conditions",
+    "",
+    "- Reuse only when the target context matches the source run evidence.",
+    "- Reuse only when the verification command meaningfully covers the behavior being changed.",
+    "- Do not reuse hidden model reasoning; use only recorded commands, outputs, diffs, and human-readable summaries.",
+    "",
+    "## Success And Failure Boundary",
+    "",
+    "- Success boundary: the run reached `VERIFIED` and recorded at least one verification command.",
+    "- Failure boundary: if the same pattern lacks verification evidence, has a blocked memory gate, or applies to a materially different context, keep it local.",
+    "",
+    "## Evidence Paths",
+    "",
+    ...params.evidencePaths.map((evidencePath) => `- \`${relativeOrAbsolute(params.workspaceRoot, evidencePath)}\``),
+    "",
+    "## Event Evidence",
+    "",
+    ...(eventLines.length > 0 ? eventLines : ["- No evidence events were found."]),
+    "",
+    "## Commands",
+    "",
+    ...(commandLines.length > 0 ? commandLines : ["- No command records were found."]),
+    "",
+    "## Changed Files",
+    "",
+    ...(changedFiles.length > 0 ? changedFiles.map((filePath: string) => `- \`${filePath}\``) : ["- None reported."]),
+    "",
+    "## Result Summary",
+    "",
+    markdownExcerpt(params.resultMd),
+    "",
+    "## Verification Evidence",
+    "",
+    markdownExcerpt(params.verificationMd),
+    "",
+    "## Residual Risk",
+    "",
+    params.manifest.result_summary
+      ? `Manifest summary: ${params.manifest.result_summary}`
+      : "No manifest result summary was recorded.",
+    "",
+    "## Human Review Checklist",
+    "",
+    "- [ ] The candidate states a reusable causal pattern, not a one-off coincidence.",
+    "- [ ] The evidence paths still exist and are inspectable.",
+    "- [ ] The success/failure boundary is clear enough to prevent overgeneralization.",
+    "- [ ] The residual risk is acceptable or explicitly documented.",
+    "",
+  ].join("\n");
+}
+
+async function extractMemoryCandidate(options?: MemoryCandidateOptions): Promise<MemoryCandidateReport | undefined> {
+  const runDir = options?.runDir ?? await vscode.window.showInputBox({
+    prompt: "Verified Run Ledger directory to extract from",
+    value: inferRunDirFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\agent-runs\<run>`,
+  });
+  if (!runDir) {
+    return;
+  }
+
+  const workspaceRoot = inferWorkspaceRootFromRunDir(runDir);
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage("Cannot infer workspace root for this run.");
+    return;
+  }
+
+  const manifestPath = path.join(runDir, "manifest.json");
+  const evidencePath = path.join(runDir, "evidence.jsonl");
+  const resultPath = path.join(runDir, "result.md");
+  const verificationPath = path.join(runDir, "verification.md");
+  const commandsPath = path.join(runDir, "commands.jsonl");
+  const changesPath = path.join(runDir, "changes.json");
+  const evidencePaths = [
+    manifestPath,
+    evidencePath,
+    resultPath,
+    verificationPath,
+    commandsPath,
+    changesPath,
+  ];
+
+  const reasons: string[] = [];
+  for (const evidencePath of evidencePaths) {
+    if (!(await pathExists(evidencePath))) {
+      reasons.push(`Missing evidence file: ${evidencePath}`);
+    }
+  }
+  if (reasons.length > 0) {
+    vscode.window.showWarningMessage(`Memory candidate blocked: ${reasons[0]}`);
+    return {
+      status: "blocked",
+      run_dir: runDir,
+      reasons,
+      evidence_paths: evidencePaths,
+    };
+  }
+
+  let manifest: JsonObject;
+  let evidenceEvents: JsonObject[];
+  let resultMd: string;
+  let verificationMd: string;
+  let commands: JsonObject[];
+  let changes: JsonObject;
+  try {
+    manifest = await readJsonFile(manifestPath);
+    evidenceEvents = await readJsonlFile(evidencePath);
+    resultMd = await fs.readFile(resultPath, "utf8");
+    verificationMd = await fs.readFile(verificationPath, "utf8");
+    commands = await readJsonlFile(commandsPath);
+    changes = await readJsonFile(changesPath);
+  } catch (error) {
+    const reason = `Cannot read Run Ledger evidence: ${unknownErrorMessage(error)}`;
+    vscode.window.showWarningMessage(`Memory candidate blocked: ${reason}`);
+    return {
+      status: "blocked",
+      run_dir: runDir,
+      reasons: [reason],
+      evidence_paths: evidencePaths,
+    };
+  }
+  const hasResultRecorded = evidenceEvents.some((record) => record.type === "result_recorded");
+  const hasCommandRecorded = commands.some((record) => record.type === "command_recorded");
+  const memoryGateDecision = String(manifest.memory_gate?.decision || "");
+
+  if (manifest.status !== "VERIFIED") {
+    reasons.push(`Run status is ${manifest.status || "unknown"}, not VERIFIED.`);
+  }
+  if (!verificationMd.trim()) {
+    reasons.push("verification.md is empty.");
+  }
+  if (!hasResultRecorded) {
+    reasons.push("evidence.jsonl has no result_recorded event.");
+  }
+  if (!hasCommandRecorded) {
+    reasons.push("commands.jsonl has no command_recorded event.");
+  }
+  if (memoryGateDecision.toLowerCase() === "blocked") {
+    reasons.push("manifest.memory_gate.decision is blocked.");
+  }
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  if (options?.showOutput !== false) {
+    channel.show(true);
+  }
+
+  if (reasons.length > 0) {
+    channel.appendLine("Memory candidate extraction blocked:");
+    for (const reason of reasons) {
+      channel.appendLine(`- ${reason}`);
+    }
+    vscode.window.showWarningMessage(`Memory candidate blocked: ${reasons[0]}`);
+    return {
+      status: "blocked",
+      run_dir: runDir,
+      reasons,
+      evidence_paths: evidencePaths,
+    };
+  }
+
+  const runId = String(manifest.run_id || path.basename(runDir));
+  const candidateDir = path.join(workspaceRoot, ".bestqa", "memory-candidates");
+  await fs.mkdir(candidateDir, { recursive: true });
+  const candidatePath = path.join(
+    candidateDir,
+    `${timestampForFile()}-${sanitizeFileSegment(runId)}.md`
+  );
+  const markdown = renderMemoryCandidateMarkdown({
+    runDir,
+    workspaceRoot,
+    manifest,
+    resultMd,
+    verificationMd,
+    evidenceEvents,
+    commands,
+    changes,
+    evidencePaths,
+  });
+  await fs.writeFile(candidatePath, markdown, "utf8");
+
+  channel.appendLine(`Memory candidate created: ${candidatePath}`);
+  if (options?.openCandidate !== false) {
+    const doc = await vscode.workspace.openTextDocument(candidatePath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.showInformationMessage("ClearLoop memory candidate created for review.");
+  }
+  return {
+    status: "created",
+    run_dir: runDir,
+    candidate_path: candidatePath,
+    reasons: [],
+    evidence_paths: evidencePaths,
+  };
+}
+
 async function recordCliRunLedgerResult() {
   if (!rustClient) {
     vscode.window.showErrorMessage("ClearLoop server is not running.");
@@ -1233,6 +1539,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("clearLoop.captureCliAgentResult", captureCliAgentResult),
 
     vscode.commands.registerCommand("clearLoop.verifyRunResult", verifyRunResult),
+
+    vscode.commands.registerCommand("clearLoop.extractMemoryCandidate", extractMemoryCandidate),
 
     vscode.commands.registerCommand("clearLoop.recordRunLedgerResult", recordCliRunLedgerResult),
 

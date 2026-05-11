@@ -126,4 +126,60 @@ suite("ClearLoop CLI agent preflight", () => {
     assert.match(commandsJsonl, /command_recorded/);
     assert.match(commandsJsonl, /passed/);
   });
+
+  test("extracts memory candidate only from verified Run Ledger", async function () {
+    this.timeout(60000);
+
+    const extension = vscode.extensions.getExtension("bestqa.clearloop");
+    assert.ok(extension, "ClearLoop extension should be discoverable by id");
+    await extension.activate();
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    assert.ok(workspaceRoot, "test host should open the repository workspace");
+
+    const commands = await vscode.commands.getCommands(true);
+    assert.ok(
+      commands.includes("clearLoop.extractMemoryCandidate"),
+      "clearLoop.extractMemoryCandidate command should be registered"
+    );
+
+    const verifiedRunDir = await createRunLedger(workspaceRoot, `memory-smoke-${Date.now()}`);
+    await vscode.commands.executeCommand<any>("clearLoop.verifyRunResult", {
+      runDir: verifiedRunDir,
+      command: "echo CLEARLOOP_MEMORY_SMOKE_OK",
+      timeoutMs: 30000,
+      openReport: false,
+      showOutput: false,
+    });
+
+    const created = await vscode.commands.executeCommand<any>("clearLoop.extractMemoryCandidate", {
+      runDir: verifiedRunDir,
+      openCandidate: false,
+      showOutput: false,
+    });
+    assert.strictEqual(created.status, "created");
+    assert.ok(created.candidate_path, "candidate path should be returned");
+
+    const candidate = await fs.readFile(created.candidate_path, "utf8");
+    assert.match(candidate, /# Memory Candidate/);
+    assert.match(candidate, /candidate_only/);
+    assert.match(candidate, /CLEARLOOP_MEMORY_SMOKE_OK/);
+    assert.match(candidate, /manifest\.json/);
+    assert.match(candidate, /evidence\.jsonl/);
+    assert.match(candidate, /result_recorded/);
+    assert.match(candidate, /verification\.md/);
+
+    const unverifiedRunDir = await createRunLedger(workspaceRoot, `memory-blocked-${Date.now()}`);
+    const blocked = await vscode.commands.executeCommand<any>("clearLoop.extractMemoryCandidate", {
+      runDir: unverifiedRunDir,
+      openCandidate: false,
+      showOutput: false,
+    });
+    assert.strictEqual(blocked.status, "blocked");
+    assert.ok(!blocked.candidate_path, "blocked extraction must not create a candidate file");
+    assert.ok(
+      blocked.reasons.some((reason: string) => reason.includes("not VERIFIED")),
+      "blocked extraction should explain the missing VERIFIED status"
+    );
+  });
 });

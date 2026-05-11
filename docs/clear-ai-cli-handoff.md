@@ -87,6 +87,20 @@ ClearLoop: Verify Run Result
 
 This runs a user-selected verification command in the workspace, writes `verification-output-<timestamp>.log` under the same run directory, and records `VERIFIED` only when the command exits successfully. A non-zero exit or timeout records `FAILED_VERIFICATION` with the output path and residual risk.
 
+To extract a reusable-memory review candidate, use:
+
+```text
+ClearLoop: Extract Memory Candidate
+```
+
+This is a gate, not promotion. It only creates a candidate when the run ledger is `VERIFIED`, `verification.md` is non-empty, `evidence.jsonl` contains a `result_recorded` event, `commands.jsonl` contains at least one `command_recorded` event, and `manifest.memory_gate.decision` is not `blocked`. The output is a human-review file under:
+
+```text
+<workspace>/.bestqa/memory-candidates/<timestamp>-<run-id>.md
+```
+
+The file is marked `candidate_only`. It must not be treated as durable memory until a human or a later explicit promotion workflow accepts it.
+
 ## Why This Exists
 
 The project goal is Clear AI:
@@ -114,11 +128,12 @@ Run ledger v1 adds appendable evidence and command streams:
 - `Start CLI Agent Run` records a controlled launch before result capture, rather than pretending the run has completed.
 - `Capture CLI Agent Result` turns terminal output into reviewable evidence without promoting it to reusable memory.
 - `Verify Run Result` turns a verification command into pass/fail evidence before memory promotion.
+- `Extract Memory Candidate` turns a verified run into a reviewable candidate only; unverified, incomplete, or explicitly blocked runs must stay local.
 
 ## Next Step
 
 After this smoke path is stable, the runner can tighten memory-gate and review UX:
 
 - explicit human acceptance of residual risk;
-- memory promotion candidate extraction;
+- explicit promotion from `candidate_only` into durable BestQ-A memory;
 - visible run timeline across preflight, start, capture, and verify.

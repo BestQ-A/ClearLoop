@@ -118,6 +118,16 @@ ClearLoop: Verify Run Result
 
 It should run a verification command from the inferred workspace root, write `verification-output-<timestamp>.log` under the run directory, call `recordRunLedgerResult`, and set status to `VERIFIED` only when the command exits with code 0 and does not time out. Failed or timed-out commands must become `FAILED_VERIFICATION`.
 
+For a minimal memory-gate smoke, verify the command palette exposes:
+
+```text
+ClearLoop: Extract Memory Candidate
+```
+
+It should only create `.bestqa/memory-candidates/<timestamp>-<run-id>.md` for a `VERIFIED` run ledger with non-empty `verification.md`, a `result_recorded` event in `evidence.jsonl`, at least one `command_recorded` event in `commands.jsonl`, and a non-blocked `manifest.memory_gate.decision`. The generated file is `candidate_only`; do not treat it as durable memory. Unverified or incomplete ledgers must return a blocked result and create no candidate file.
+
+The Extension Host smoke in `src/test/checkCliAgents.test.ts` should cover both verified candidate creation and unverified-run blocking when this command changes.
+
 ## Engineering Rules
 
 - Keep UI, extension host, Rust backend, and webview concerns separated.
