@@ -142,6 +142,10 @@ suite("ClearLoop CLI agent preflight", () => {
       commands.includes("clearLoop.extractMemoryCandidate"),
       "clearLoop.extractMemoryCandidate command should be registered"
     );
+    assert.ok(
+      commands.includes("clearLoop.promoteMemoryCandidate"),
+      "clearLoop.promoteMemoryCandidate command should be registered"
+    );
 
     const verifiedRunDir = await createRunLedger(workspaceRoot, `memory-smoke-${Date.now()}`);
     await vscode.commands.executeCommand<any>("clearLoop.verifyRunResult", {
@@ -168,6 +172,48 @@ suite("ClearLoop CLI agent preflight", () => {
     assert.match(candidate, /evidence\.jsonl/);
     assert.match(candidate, /result_recorded/);
     assert.match(candidate, /verification\.md/);
+
+    const declined = await vscode.commands.executeCommand<any>("clearLoop.promoteMemoryCandidate", {
+      candidatePath: created.candidate_path,
+      accepted: false,
+      openMemory: false,
+      showOutput: false,
+    });
+    assert.strictEqual(declined.status, "blocked");
+    assert.ok(
+      declined.reasons.some((reason: string) => reason.includes("Human acceptance")),
+      "promotion should require explicit human acceptance"
+    );
+
+    const promoted = await vscode.commands.executeCommand<any>("clearLoop.promoteMemoryCandidate", {
+      candidatePath: created.candidate_path,
+      accepted: true,
+      acceptedBy: "extension-host-smoke",
+      reviewNote: "Accepted because the smoke run has explicit verification and evidence boundaries.",
+      openMemory: false,
+      showOutput: false,
+    });
+    assert.strictEqual(promoted.status, "promoted");
+    assert.ok(promoted.memory_path, "promoted memory path should be returned");
+    assert.ok(promoted.promotion_record_path, "promotion index path should be returned");
+
+    const memory = await fs.readFile(promoted.memory_path, "utf8");
+    assert.match(memory, /# Promoted Memory/);
+    assert.match(memory, /promoted_memory/);
+    assert.match(memory, /extension-host-smoke/);
+    assert.match(memory, /CLEARLOOP_MEMORY_SMOKE_OK/);
+
+    const promotedManifest = JSON.parse(await fs.readFile(path.join(verifiedRunDir, "manifest.json"), "utf8"));
+    assert.strictEqual(promotedManifest.status, "PROMOTED_TO_MEMORY");
+    assert.strictEqual(promotedManifest.memory_gate.decision, "promoted");
+    assert.strictEqual(promotedManifest.memory_gate.accepted_by, "extension-host-smoke");
+
+    const promotedEvidence = await fs.readFile(path.join(verifiedRunDir, "evidence.jsonl"), "utf8");
+    assert.match(promotedEvidence, /memory_promoted/);
+
+    const promotionIndex = await fs.readFile(promoted.promotion_record_path, "utf8");
+    assert.match(promotionIndex, /memory_promoted/);
+    assert.match(promotionIndex, /extension-host-smoke/);
 
     const unverifiedRunDir = await createRunLedger(workspaceRoot, `memory-blocked-${Date.now()}`);
     const blocked = await vscode.commands.executeCommand<any>("clearLoop.extractMemoryCandidate", {

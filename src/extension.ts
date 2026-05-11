@@ -186,6 +186,32 @@ function inferWorkspaceRootFromRunDir(runDir: string): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+function inferCandidatePathFromActiveDocument(): string | undefined {
+  const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
+  if (!activePath) {
+    return undefined;
+  }
+  const parts = activePath.split(/[\\/]+/);
+  const bestqaIndex = parts.lastIndexOf(".bestqa");
+  if (
+    bestqaIndex >= 0 &&
+    parts[bestqaIndex + 1] === "memory-candidates" &&
+    parts[bestqaIndex + 2]
+  ) {
+    return activePath;
+  }
+  return undefined;
+}
+
+function inferWorkspaceRootFromBestqaPath(targetPath: string, folderName: string): string | undefined {
+  const parts = targetPath.split(/[\\/]+/);
+  const bestqaIndex = parts.lastIndexOf(".bestqa");
+  if (bestqaIndex > 0 && parts[bestqaIndex + 1] === folderName) {
+    return parts.slice(0, bestqaIndex).join(path.sep);
+  }
+  return undefined;
+}
+
 function quotePowerShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -416,6 +442,25 @@ type MemoryCandidateReport = {
   evidence_paths: string[];
 };
 
+type PromoteMemoryCandidateOptions = {
+  candidatePath?: string;
+  accepted?: boolean;
+  acceptedBy?: string;
+  reviewNote?: string;
+  openMemory?: boolean;
+  showOutput?: boolean;
+};
+
+type PromoteMemoryCandidateReport = {
+  status: "promoted" | "blocked";
+  candidate_path: string;
+  source_run?: string;
+  memory_path?: string;
+  promotion_record_path?: string;
+  reasons: string[];
+  evidence_paths: string[];
+};
+
 function summarizeOutput(value: string | undefined, maxChars = 4000): string | undefined {
   if (!value) {
     return undefined;
@@ -471,6 +516,11 @@ async function readJsonlFile(filePath: string): Promise<JsonObject[]> {
 
 function sanitizeFileSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "run";
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+  const relativePath = path.relative(parentPath, childPath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
 
 function relativeOrAbsolute(workspaceRoot: string, targetPath: string): string {
@@ -541,6 +591,11 @@ function executablePathsFromWhere(output: string | undefined): string[] {
 
 function timestampForFile(date = new Date()): string {
   return date.toISOString().replace(/[:.]/g, "-");
+}
+
+async function appendJsonl(filePath: string, record: JsonObject): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.appendFile(filePath, `${JSON.stringify(record)}\n`, "utf8");
 }
 
 async function runCodexSmoke(workspaceRoot: string): Promise<CliCheckStep> {
@@ -1331,6 +1386,300 @@ async function extractMemoryCandidate(options?: MemoryCandidateOptions): Promise
   };
 }
 
+function cleanFsPathInput(value: string): string {
+  return value.trim().replace(/^["']|["']$/g, "");
+}
+
+function extractBacktickField(markdown: string, label: string): string | undefined {
+  const prefix = `${label}:`;
+  for (const line of markdown.split(/\r?\n/)) {
+    if (!line.startsWith(prefix)) {
+      continue;
+    }
+    return line.match(/`([^`]+)`/)?.[1];
+  }
+  return undefined;
+}
+
+function renderPromotedMemoryMarkdown(params: {
+  candidatePath: string;
+  sourceRun: string;
+  memoryPath: string;
+  promotedAt: string;
+  acceptedBy: string;
+  reviewNote: string;
+  candidateMarkdown: string;
+  workspaceRoot: string;
+}): string {
+  return [
+    "# Promoted Memory",
+    "",
+    "Status: `promoted_memory`",
+    "Schema: `clearloop.memory.v1`",
+    "",
+    `Promoted at: ${params.promotedAt}`,
+    `Accepted by: ${params.acceptedBy}`,
+    `Source candidate: \`${relativeOrAbsolute(params.workspaceRoot, params.candidatePath)}\``,
+    `Source run: \`${relativeOrAbsolute(params.workspaceRoot, params.sourceRun)}\``,
+    `Memory path: \`${relativeOrAbsolute(params.workspaceRoot, params.memoryPath)}\``,
+    "",
+    "## Human Acceptance",
+    "",
+    params.reviewNote,
+    "",
+    "## Reuse Boundary",
+    "",
+    "- This memory was promoted from a `candidate_only` ClearLoop memory candidate.",
+    "- Reuse requires matching the source run context, evidence paths, and verification meaning.",
+    "- Do not treat this as hidden model reasoning; only recorded evidence and human acceptance are durable.",
+    "",
+    "## Candidate Evidence Snapshot",
+    "",
+    params.candidateMarkdown.trim(),
+    "",
+  ].join("\n");
+}
+
+async function promoteMemoryCandidate(
+  options?: PromoteMemoryCandidateOptions
+): Promise<PromoteMemoryCandidateReport | undefined> {
+  const candidateInput = options?.candidatePath ?? await vscode.window.showInputBox({
+    prompt: "Memory candidate file to promote",
+    value: inferCandidatePathFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\memory-candidates\<candidate>.md`,
+  });
+  if (!candidateInput) {
+    return;
+  }
+
+  const candidatePath = cleanFsPathInput(candidateInput);
+  const workspaceRoot = inferWorkspaceRootFromBestqaPath(candidatePath, "memory-candidates");
+  const initialEvidencePaths = [candidatePath];
+
+  const blocked = (
+    reasons: string[],
+    evidencePaths: string[] = initialEvidencePaths,
+    sourceRun?: string
+  ): PromoteMemoryCandidateReport => {
+    vscode.window.showWarningMessage(`Memory promotion blocked: ${reasons[0]}`);
+    return {
+      status: "blocked",
+      candidate_path: candidatePath,
+      source_run: sourceRun,
+      reasons,
+      evidence_paths: evidencePaths,
+    };
+  };
+
+  if (!workspaceRoot) {
+    return blocked(["Candidate must be under <workspace>/.bestqa/memory-candidates/."]);
+  }
+
+  const candidateRoot = path.join(workspaceRoot, ".bestqa", "memory-candidates");
+  if (!isPathInside(candidateRoot, candidatePath)) {
+    return blocked(["Candidate path is outside the workspace memory-candidates directory."]);
+  }
+
+  let candidateMarkdown: string;
+  try {
+    candidateMarkdown = await fs.readFile(candidatePath, "utf8");
+  } catch (error) {
+    return blocked([`Cannot read memory candidate: ${unknownErrorMessage(error)}`]);
+  }
+
+  const reasons: string[] = [];
+  const requiredSections = [
+    { label: "memory candidate heading", pattern: /^# Memory Candidate/m },
+    { label: "candidate_only status", pattern: /Status:\s*`candidate_only`/ },
+    { label: "reusable claim", pattern: /^## Reusable Claim/m },
+    { label: "success/failure boundary", pattern: /^## Success And Failure Boundary/m },
+    { label: "verification evidence", pattern: /^## Verification Evidence/m },
+    { label: "human review checklist", pattern: /^## Human Review Checklist/m },
+  ];
+  for (const section of requiredSections) {
+    if (!section.pattern.test(candidateMarkdown)) {
+      reasons.push(`Candidate is missing ${section.label}.`);
+    }
+  }
+
+  const sourceRunRaw = extractBacktickField(candidateMarkdown, "Source run");
+  const sourceRun = sourceRunRaw
+    ? path.normalize(path.isAbsolute(sourceRunRaw) ? sourceRunRaw : path.resolve(workspaceRoot, sourceRunRaw))
+    : undefined;
+  if (!sourceRun) {
+    reasons.push("Candidate is missing Source run.");
+  }
+
+  const evidencePaths = sourceRun
+    ? [
+        candidatePath,
+        path.join(sourceRun, "manifest.json"),
+        path.join(sourceRun, "evidence.jsonl"),
+        path.join(sourceRun, "verification.md"),
+        path.join(sourceRun, "result.md"),
+      ]
+    : initialEvidencePaths;
+
+  if (sourceRun) {
+    const runRoot = path.join(workspaceRoot, ".bestqa", "agent-runs");
+    if (!isPathInside(runRoot, sourceRun)) {
+      reasons.push("Source run is outside the workspace agent-runs directory.");
+    }
+    for (const evidencePath of evidencePaths) {
+      if (!(await pathExists(evidencePath))) {
+        reasons.push(`Missing source evidence: ${evidencePath}`);
+      }
+    }
+  }
+
+  let sourceManifest: JsonObject | undefined;
+  if (sourceRun && reasons.length === 0) {
+    try {
+      sourceManifest = await readJsonFile(path.join(sourceRun, "manifest.json"));
+    } catch (error) {
+      reasons.push(`Cannot read source run manifest: ${unknownErrorMessage(error)}`);
+    }
+  }
+
+  if (sourceManifest) {
+    const status = String(sourceManifest.status || "unknown");
+    const memoryGateDecision = String(sourceManifest.memory_gate?.decision || "");
+    if (status === "PROMOTED_TO_MEMORY") {
+      reasons.push("Source run is already PROMOTED_TO_MEMORY.");
+    } else if (status !== "VERIFIED") {
+      reasons.push(`Source run status is ${status}, not VERIFIED.`);
+    }
+    if (memoryGateDecision.toLowerCase() === "blocked") {
+      reasons.push("Source run memory gate is blocked.");
+    }
+  }
+
+  if (reasons.length > 0) {
+    return blocked(reasons, evidencePaths, sourceRun);
+  }
+
+  let accepted = options?.accepted;
+  if (accepted === undefined) {
+    const choice = await vscode.window.showQuickPick(
+      [
+        {
+          label: "Promote candidate",
+          description: "I accept the residual risk and want this stored as local reusable memory",
+          accepted: true,
+        },
+        {
+          label: "Cancel",
+          description: "Keep this as candidate_only",
+          accepted: false,
+        },
+      ],
+      {
+        title: "ClearLoop memory promotion gate",
+        placeHolder: "Promotion requires explicit human acceptance",
+      }
+    );
+    accepted = choice?.accepted ?? false;
+  }
+  if (!accepted) {
+    return blocked(["Human acceptance was not granted."], evidencePaths, sourceRun);
+  }
+
+  const acceptedBy = options?.acceptedBy ?? await vscode.window.showInputBox({
+    prompt: "Accepted by",
+    value: os.userInfo().username || "human",
+  });
+  if (!acceptedBy?.trim()) {
+    return blocked(["Accepted-by identity is required."], evidencePaths, sourceRun);
+  }
+
+  const reviewNote = options?.reviewNote ?? await vscode.window.showInputBox({
+    prompt: "Human review note",
+    value: "Accepted as reusable memory because the evidence and verification boundary were reviewed.",
+  });
+  if (!reviewNote?.trim()) {
+    return blocked(["Human review note is required."], evidencePaths, sourceRun);
+  }
+
+  const promotedAt = new Date().toISOString();
+  const memoryDir = path.join(workspaceRoot, ".bestqa", "memory", "promoted");
+  const memoryPath = path.join(
+    memoryDir,
+    `${timestampForFile(new Date(promotedAt))}-${sanitizeFileSegment(path.basename(candidatePath, ".md"))}.md`
+  );
+  const promotionRecordPath = path.join(workspaceRoot, ".bestqa", "memory", "promotions.jsonl");
+  const memoryMarkdown = renderPromotedMemoryMarkdown({
+    candidatePath,
+    sourceRun: sourceRun!,
+    memoryPath,
+    promotedAt,
+    acceptedBy: acceptedBy.trim(),
+    reviewNote: reviewNote.trim(),
+    candidateMarkdown,
+    workspaceRoot,
+  });
+  const promotionRecord = {
+    ts: promotedAt,
+    type: "memory_promoted",
+    schema_version: "clearloop.memory-promotion.v1",
+    candidate_path: candidatePath,
+    source_run: sourceRun,
+    memory_path: memoryPath,
+    accepted_by: acceptedBy.trim(),
+    review_note: reviewNote.trim(),
+  };
+
+  try {
+    await fs.mkdir(memoryDir, { recursive: true });
+    await fs.writeFile(memoryPath, memoryMarkdown, "utf8");
+    await appendJsonl(promotionRecordPath, promotionRecord);
+
+    const manifestPath = path.join(sourceRun!, "manifest.json");
+    await fs.writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        ...sourceManifest,
+        status: "PROMOTED_TO_MEMORY",
+        memory_gate: {
+          ...(sourceManifest?.memory_gate ?? {}),
+          decision: "promoted",
+          reason: reviewNote.trim(),
+          promoted_at: promotedAt,
+          accepted_by: acceptedBy.trim(),
+          memory_path: memoryPath,
+        },
+      }, null, 2)}\n`,
+      "utf8"
+    );
+    await appendJsonl(path.join(sourceRun!, "evidence.jsonl"), promotionRecord);
+  } catch (error) {
+    return blocked([`Cannot write promoted memory: ${unknownErrorMessage(error)}`], evidencePaths, sourceRun);
+  }
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  if (options?.showOutput !== false) {
+    channel.show(true);
+  }
+  channel.appendLine(`Promoted memory candidate: ${memoryPath}`);
+
+  if (options?.openMemory !== false) {
+    const doc = await vscode.workspace.openTextDocument(memoryPath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.showInformationMessage("ClearLoop memory candidate promoted.");
+  }
+
+  return {
+    status: "promoted",
+    candidate_path: candidatePath,
+    source_run: sourceRun,
+    memory_path: memoryPath,
+    promotion_record_path: promotionRecordPath,
+    reasons: [],
+    evidence_paths: evidencePaths,
+  };
+}
+
 async function recordCliRunLedgerResult() {
   if (!rustClient) {
     vscode.window.showErrorMessage("ClearLoop server is not running.");
@@ -1541,6 +1890,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("clearLoop.verifyRunResult", verifyRunResult),
 
     vscode.commands.registerCommand("clearLoop.extractMemoryCandidate", extractMemoryCandidate),
+
+    vscode.commands.registerCommand("clearLoop.promoteMemoryCandidate", promoteMemoryCandidate),
 
     vscode.commands.registerCommand("clearLoop.recordRunLedgerResult", recordCliRunLedgerResult),
 

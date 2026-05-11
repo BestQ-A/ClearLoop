@@ -101,6 +101,21 @@ This is a gate, not promotion. It only creates a candidate when the run ledger i
 
 The file is marked `candidate_only`. It must not be treated as durable memory until a human or a later explicit promotion workflow accepts it.
 
+To promote a reviewed candidate into local reusable memory, use:
+
+```text
+ClearLoop: Promote Memory Candidate
+```
+
+This command still does not write into the BestQ-A core directly. It requires an extracted `candidate_only` file, source run evidence under `.bestqa/agent-runs/`, and explicit human acceptance with a review note. Promotion writes:
+
+```text
+<workspace>/.bestqa/memory/promoted/<timestamp>-<candidate>.md
+<workspace>/.bestqa/memory/promotions.jsonl
+```
+
+It also updates the source run manifest to `PROMOTED_TO_MEMORY` and appends `memory_promoted` to `evidence.jsonl`. If acceptance is declined, source evidence is missing, or the run is no longer `VERIFIED`, the command returns `blocked`.
+
 ## Why This Exists
 
 The project goal is Clear AI:
@@ -129,11 +144,12 @@ Run ledger v1 adds appendable evidence and command streams:
 - `Capture CLI Agent Result` turns terminal output into reviewable evidence without promoting it to reusable memory.
 - `Verify Run Result` turns a verification command into pass/fail evidence before memory promotion.
 - `Extract Memory Candidate` turns a verified run into a reviewable candidate only; unverified, incomplete, or explicitly blocked runs must stay local.
+- `Promote Memory Candidate` records explicit human acceptance before a candidate becomes local reusable memory.
 
 ## Next Step
 
 After this smoke path is stable, the runner can tighten memory-gate and review UX:
 
-- explicit human acceptance of residual risk;
-- explicit promotion from `candidate_only` into durable BestQ-A memory;
+- better review UI for editing the reusable claim before promotion;
+- export/import contracts for BestQ-A durable memory;
 - visible run timeline across preflight, start, capture, and verify.

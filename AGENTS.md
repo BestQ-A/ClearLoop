@@ -128,6 +128,16 @@ It should only create `.bestqa/memory-candidates/<timestamp>-<run-id>.md` for a 
 
 The Extension Host smoke in `src/test/checkCliAgents.test.ts` should cover both verified candidate creation and unverified-run blocking when this command changes.
 
+For a minimal promotion smoke, verify the command palette exposes:
+
+```text
+ClearLoop: Promote Memory Candidate
+```
+
+It should require an extracted `candidate_only` file under `.bestqa/memory-candidates/`, source evidence under `.bestqa/agent-runs/`, and explicit human acceptance plus a review note. Successful promotion writes `.bestqa/memory/promoted/<timestamp>-<candidate>.md`, appends `.bestqa/memory/promotions.jsonl`, updates the source run manifest status to `PROMOTED_TO_MEMORY`, and appends a `memory_promoted` evidence event. Declined acceptance or missing evidence must return a blocked result.
+
+The Extension Host smoke in `src/test/checkCliAgents.test.ts` should cover human-acceptance blocking and successful promotion when this command changes.
+
 ## Engineering Rules
 
 - Keep UI, extension host, Rust backend, and webview concerns separated.
