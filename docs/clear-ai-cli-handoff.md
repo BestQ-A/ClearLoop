@@ -48,6 +48,12 @@ ClearLoop: Start CLI Agent Run
 
 This opens a VS Code terminal, runs a command that pipes `handoff.md` into Codex CLI or Claude Code, and records `RUNNING` plus the launched command in the same ledger. The terminal remains visible so the human can interrupt it.
 
+The Codex CLI command shape must match the live `codex exec --help` surface. The current validated command does not include an approval flag:
+
+```powershell
+Get-Content -Raw -LiteralPath <handoff.md> | codex exec -C <workspace> -s workspace-write --output-last-message <last-message.md> - 2>&1 | Tee-Object -FilePath <cli-output.log>
+```
+
 To capture the visible CLI run after it finishes, use:
 
 ```text

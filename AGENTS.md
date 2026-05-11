@@ -78,6 +78,14 @@ ClearLoop: Start CLI Agent Run
 
 It should infer the active run directory from an open file under `.bestqa/agent-runs/<run>/`, record `RUNNING`, append `command_recorded`, and launch a visible PowerShell terminal.
 
+For Codex CLI starts, keep the generated command aligned with the local `codex exec --help` surface. The current validated shape is:
+
+```powershell
+Get-Content -Raw -LiteralPath <handoff.md> | codex exec -C <workspace> -s workspace-write --output-last-message <last-message.md> - 2>&1 | Tee-Object -FilePath <cli-output.log>
+```
+
+Do not add unsupported approval flags such as `-a on-request`; verify CLI flags live when changing this path.
+
 For a minimal completion capture smoke, verify the command palette exposes:
 
 ```text

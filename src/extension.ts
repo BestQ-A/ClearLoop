@@ -331,7 +331,6 @@ function buildCliRunCommand(agentId: string, workspaceRoot: string, runDir: stri
       "-C",
       quotePowerShellLiteral(workspaceRoot),
       "-s workspace-write",
-      "-a on-request",
       "--output-last-message",
       quotePowerShellLiteral(lastMessagePath),
       "-",
