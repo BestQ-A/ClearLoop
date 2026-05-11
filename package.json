@@ -70,6 +70,7 @@
       { "command": "clearLoop.checkCliAgents", "title": "ClearLoop: Check CLI Agents" },
       { "command": "clearLoop.startCliAgentRun", "title": "ClearLoop: Start CLI Agent Run" },
       { "command": "clearLoop.captureCliAgentResult", "title": "ClearLoop: Capture CLI Agent Result" },
+      { "command": "clearLoop.verifyRunResult", "title": "ClearLoop: Verify Run Result" },
       { "command": "clearLoop.recordRunLedgerResult", "title": "ClearLoop: Record Run Ledger Result" },
       { "command": "clearLoop.codexLogin", "title": "ClearLoop: Codex Login" },
       { "command": "clearLoop.codexStatus", "title": "ClearLoop: Codex Login Status" }

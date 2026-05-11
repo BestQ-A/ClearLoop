@@ -376,6 +376,30 @@ type CliAgentCheckReport = {
   report_path: string;
 };
 
+type CommandCapture = {
+  exitCode: number | null;
+  output: string;
+  timedOut: boolean;
+};
+
+type VerifyRunResultOptions = {
+  runDir?: string;
+  command?: string;
+  timeoutMs?: number;
+  openReport?: boolean;
+  showOutput?: boolean;
+};
+
+type VerifyRunResultReport = {
+  run_dir: string;
+  status: "VERIFIED" | "FAILED_VERIFICATION";
+  command: string;
+  exit_code: number | null;
+  output_path: string;
+  changed_files: string[];
+  artifacts: string[];
+};
+
 function summarizeOutput(value: string | undefined, maxChars = 4000): string | undefined {
   if (!value) {
     return undefined;
@@ -399,6 +423,47 @@ async function runCheckStep(command: string, args: string[], cwd: string, timeou
       error: summarizeOutput(error.message || String(error)),
     };
   }
+}
+
+function runShellCommandCapture(command: string, cwd: string, timeoutMs: number): Promise<CommandCapture> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [], {
+      cwd,
+      shell: true,
+      windowsHide: true,
+    });
+    let output = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (child.pid && process.platform === "win32") {
+        spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+        });
+      } else {
+        child.kill();
+      }
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk) => {
+      output += chunk.toString("utf8");
+    });
+    child.stderr?.on("data", (chunk) => {
+      output += chunk.toString("utf8");
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode: code,
+        output,
+        timedOut,
+      });
+    });
+  });
 }
 
 function executablePathsFromWhere(output: string | undefined): string[] {
@@ -853,6 +918,113 @@ async function captureCliAgentResult() {
   vscode.window.showInformationMessage(`ClearLoop captured CLI result: ${status}`);
 }
 
+async function verifyRunResult(options?: VerifyRunResultOptions): Promise<VerifyRunResultReport | undefined> {
+  if (!rustClient) {
+    vscode.window.showErrorMessage("ClearLoop server is not running.");
+    return;
+  }
+
+  const runDir = options?.runDir ?? await vscode.window.showInputBox({
+    prompt: "Run ledger directory to verify",
+    value: inferRunDirFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\agent-runs\<run>`,
+  });
+  if (!runDir) {
+    return;
+  }
+
+  const workspaceRoot = inferWorkspaceRootFromRunDir(runDir);
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage("Cannot infer workspace root for this run.");
+    return;
+  }
+
+  const command = options?.command ?? await vscode.window.showInputBox({
+    prompt: "Verification command to run",
+    value: "npm test",
+  });
+  if (!command) {
+    return;
+  }
+
+  const timeoutMs = options?.timeoutMs ?? 600000;
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  if (options?.showOutput !== false) {
+    channel.show(true);
+  }
+  channel.appendLine(`Running verification command: ${command}`);
+
+  const startedAt = new Date();
+  const capture = await runShellCommandCapture(command, workspaceRoot, timeoutMs);
+  const outputPath = path.join(runDir, `verification-output-${timestampForFile(startedAt)}.log`);
+  await fs.writeFile(outputPath, capture.output || "", "utf8");
+
+  const passed = capture.exitCode === 0 && !capture.timedOut;
+  const status = passed ? "VERIFIED" : "FAILED_VERIFICATION";
+  const changedFiles = await listChangedFilesFromGit(workspaceRoot);
+  const outputSummary = summarizeOutput(capture.output, 4000) || "Verification command produced no output.";
+  const verification = [
+    `Command: ${command}`,
+    `Exit code: ${capture.exitCode === null ? "null" : capture.exitCode}`,
+    `Timed out: ${capture.timedOut}`,
+    `Output path: ${outputPath}`,
+    "",
+    outputSummary,
+  ].join("\n");
+  const residualRisk = passed
+    ? "Verification command passed. Review scope still depends on whether the command covers the intended behavior."
+    : "Verification command failed or timed out. Inspect the output path and treat this run as not verified.";
+
+  const result = await rustClient.request("recordRunLedgerResult", {
+    run_dir: runDir,
+    status,
+    summary: passed
+      ? `Verification passed: ${command}`
+      : `Verification failed: ${command}`,
+    changed_files: changedFiles,
+    commands: [
+      {
+        command,
+        status: passed ? "passed" : "failed",
+        summary: passed ? "Verification command exited successfully." : "Verification command failed or timed out.",
+        output_path: outputPath,
+      },
+    ],
+    verification,
+    residual_risk: residualRisk,
+    memory_gate: {
+      decision: passed ? "ready_for_review" : "blocked",
+      reason: passed
+        ? "Verification evidence is available, but reusable memory promotion still requires review."
+        : "Failed verification cannot be promoted to reusable memory.",
+    },
+  });
+
+  channel.appendLine(`Verification result: ${status}`);
+  channel.appendLine(`Verification output: ${outputPath}`);
+
+  const resultPath = result?.artifacts?.find((artifact: string) =>
+    artifact.endsWith(`${path.sep}result.md`) || artifact.endsWith("/result.md")
+  );
+  if (resultPath && options?.openReport !== false) {
+    const doc = await vscode.workspace.openTextDocument(resultPath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.showInformationMessage(`ClearLoop verification recorded: ${status}`);
+  }
+
+  return {
+    run_dir: runDir,
+    status,
+    command,
+    exit_code: capture.exitCode,
+    output_path: outputPath,
+    changed_files: changedFiles,
+    artifacts: result?.artifacts ?? [],
+  };
+}
+
 async function recordCliRunLedgerResult() {
   if (!rustClient) {
     vscode.window.showErrorMessage("ClearLoop server is not running.");
@@ -1059,6 +1231,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("clearLoop.startCliAgentRun", startCliAgentRun),
 
     vscode.commands.registerCommand("clearLoop.captureCliAgentResult", captureCliAgentResult),
+
+    vscode.commands.registerCommand("clearLoop.verifyRunResult", verifyRunResult),
 
     vscode.commands.registerCommand("clearLoop.recordRunLedgerResult", recordCliRunLedgerResult),
 

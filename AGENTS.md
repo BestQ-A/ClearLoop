@@ -110,6 +110,14 @@ ClearLoop: Capture CLI Agent Result
 
 It should infer the active run directory, read `last-message.md` or `cli-output.log`, detect changed files from `git status --porcelain`, call `recordRunLedgerResult`, and open `result.md`. Default to `WAITING_FOR_REVIEW` unless verification has actually happened.
 
+For a minimal verification smoke, verify the command palette exposes:
+
+```text
+ClearLoop: Verify Run Result
+```
+
+It should run a verification command from the inferred workspace root, write `verification-output-<timestamp>.log` under the run directory, call `recordRunLedgerResult`, and set status to `VERIFIED` only when the command exits with code 0 and does not time out. Failed or timed-out commands must become `FAILED_VERIFICATION`.
+
 ## Engineering Rules
 
 - Keep UI, extension host, Rust backend, and webview concerns separated.

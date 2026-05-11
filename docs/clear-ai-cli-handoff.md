@@ -79,6 +79,14 @@ ClearLoop: Capture CLI Agent Result
 
 This reads `last-message.md` or `cli-output.log`, detects changed files from `git status --porcelain`, and records the output into the same ledger. It defaults to a review-oriented status; only mark `VERIFIED` when verification has actually happened.
 
+To run and record a verification command, use:
+
+```text
+ClearLoop: Verify Run Result
+```
+
+This runs a user-selected verification command in the workspace, writes `verification-output-<timestamp>.log` under the same run directory, and records `VERIFIED` only when the command exits successfully. A non-zero exit or timeout records `FAILED_VERIFICATION` with the output path and residual risk.
+
 ## Why This Exists
 
 The project goal is Clear AI:
@@ -105,12 +113,12 @@ Run ledger v1 adds appendable evidence and command streams:
 - `recordRunLedgerResult` turns a handoff into a reviewable result by updating `manifest.json`, `changes.json`, `verification.md`, `result.md`, `commands.jsonl`, and `evidence.jsonl`.
 - `Start CLI Agent Run` records a controlled launch before result capture, rather than pretending the run has completed.
 - `Capture CLI Agent Result` turns terminal output into reviewable evidence without promoting it to reusable memory.
+- `Verify Run Result` turns a verification command into pass/fail evidence before memory promotion.
 
 ## Next Step
 
-After this smoke path is stable, the runner can add controlled execution adapters:
+After this smoke path is stable, the runner can tighten memory-gate and review UX:
 
-- Codex CLI adapter;
-- Claude Code CLI adapter;
-- explicit approval gates before file edits;
-- automatic verification command capture before marking work complete.
+- explicit human acceptance of residual risk;
+- memory promotion candidate extraction;
+- visible run timeline across preflight, start, capture, and verify.
