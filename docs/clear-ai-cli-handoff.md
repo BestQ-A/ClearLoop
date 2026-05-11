@@ -48,6 +48,14 @@ ClearLoop: Start CLI Agent Run
 
 This opens a VS Code terminal, runs a command that pipes `handoff.md` into Codex CLI or Claude Code, and records `RUNNING` plus the launched command in the same ledger. The terminal remains visible so the human can interrupt it.
 
+To capture the visible CLI run after it finishes, use:
+
+```text
+ClearLoop: Capture CLI Agent Result
+```
+
+This reads `last-message.md` or `cli-output.log`, detects changed files from `git status --porcelain`, and records the output into the same ledger. It defaults to a review-oriented status; only mark `VERIFIED` when verification has actually happened.
+
 ## Why This Exists
 
 The project goal is Clear AI:
@@ -72,6 +80,7 @@ Run ledger v1 adds appendable evidence and command streams:
 - `verification.md` is the human-readable verification gate.
 - `recordRunLedgerResult` turns a handoff into a reviewable result by updating `manifest.json`, `changes.json`, `verification.md`, `result.md`, `commands.jsonl`, and `evidence.jsonl`.
 - `Start CLI Agent Run` records a controlled launch before result capture, rather than pretending the run has completed.
+- `Capture CLI Agent Result` turns terminal output into reviewable evidence without promoting it to reusable memory.
 
 ## Next Step
 
@@ -80,5 +89,4 @@ After this smoke path is stable, the runner can add controlled execution adapter
 - Codex CLI adapter;
 - Claude Code CLI adapter;
 - explicit approval gates before file edits;
-- automatic result capture into `result.md`;
 - automatic verification command capture before marking work complete.

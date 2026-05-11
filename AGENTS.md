@@ -78,6 +78,14 @@ ClearLoop: Start CLI Agent Run
 
 It should infer the active run directory from an open file under `.bestqa/agent-runs/<run>/`, record `RUNNING`, append `command_recorded`, and launch a visible PowerShell terminal.
 
+For a minimal completion capture smoke, verify the command palette exposes:
+
+```text
+ClearLoop: Capture CLI Agent Result
+```
+
+It should infer the active run directory, read `last-message.md` or `cli-output.log`, detect changed files from `git status --porcelain`, call `recordRunLedgerResult`, and open `result.md`. Default to `WAITING_FOR_REVIEW` unless verification has actually happened.
+
 ## Engineering Rules
 
 - Keep UI, extension host, Rust backend, and webview concerns separated.

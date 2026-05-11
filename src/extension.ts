@@ -199,6 +199,123 @@ function parseListInput(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function runCommandText(command: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      shell: true,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", (err) => {
+      reject(err);
+    });
+    child.on("close", (code) => {
+      const output = `${stdout}${stderr}`;
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(new Error(output || `${command} exited with code ${code}`));
+      }
+    });
+  });
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readTextTail(filePath: string, maxBytes = 64 * 1024): Promise<string> {
+  const stat = await fs.stat(filePath);
+  const length = Math.min(stat.size, maxBytes);
+  const position = Math.max(0, stat.size - length);
+  const handle = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, position);
+    const prefix =
+      stat.size > maxBytes
+        ? `[Captured final ${length} bytes of ${stat.size} bytes]\n\n`
+        : "";
+    return `${prefix}${buffer.toString("utf8")}`;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readCliResultOutput(runDir: string): Promise<{ sourcePath: string; content: string }> {
+  const candidates = [
+    path.join(runDir, "last-message.md"),
+    path.join(runDir, "cli-output.log"),
+  ];
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) {
+      return {
+        sourcePath: candidate,
+        content: await readTextTail(candidate),
+      };
+    }
+  }
+  throw new Error(`No CLI output found. Expected ${candidates.join(" or ")}`);
+}
+
+function compactCapturedOutput(sourcePath: string, content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  const sourceName = path.basename(sourcePath);
+  if (!normalized) {
+    return `CLI output was captured from ${sourceName}, but the file was empty.`;
+  }
+  const maxChars = 4000;
+  const excerpt =
+    normalized.length > maxChars
+      ? `[Tail excerpt from ${sourceName}]\n\n${normalized.slice(-maxChars)}`
+      : `[Captured output from ${sourceName}]\n\n${normalized}`;
+  return excerpt;
+}
+
+function parseGitStatusFiles(output: string): string[] {
+  const files = new Set<string>();
+  for (const rawLine of output.split(/\r?\n/)) {
+    if (!rawLine.trim()) {
+      continue;
+    }
+    let filePath = rawLine.length > 3 ? rawLine.slice(3).trim() : rawLine.trim();
+    const renameIndex = filePath.indexOf(" -> ");
+    if (renameIndex >= 0) {
+      filePath = filePath.slice(renameIndex + 4).trim();
+    }
+    filePath = filePath.replace(/^"|"$/g, "");
+    if (filePath.replace(/\\/g, "/").includes(".bestqa/agent-runs/")) {
+      continue;
+    }
+    if (filePath) {
+      files.add(filePath);
+    }
+  }
+  return [...files].sort();
+}
+
+async function listChangedFilesFromGit(workspaceRoot: string): Promise<string[]> {
+  try {
+    const output = await runCommandText("git", ["status", "--porcelain=v1"], workspaceRoot);
+    return parseGitStatusFiles(output);
+  } catch {
+    return [];
+  }
+}
+
 function buildCliRunCommand(agentId: string, workspaceRoot: string, runDir: string): string {
   const handoffPath = path.join(runDir, "handoff.md");
   const logPath = path.join(runDir, "cli-output.log");
@@ -332,6 +449,107 @@ async function startCliAgentRun() {
   channel.appendLine(`Run ledger: ${runDir}`);
 
   vscode.window.showInformationMessage(`ClearLoop started ${agentId}. Record the result after it finishes.`);
+}
+
+async function captureCliAgentResult() {
+  if (!rustClient) {
+    vscode.window.showErrorMessage("ClearLoop server is not running.");
+    return;
+  }
+
+  const runDir = await vscode.window.showInputBox({
+    prompt: "Run ledger directory to capture",
+    value: inferRunDirFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\agent-runs\<run>`,
+  });
+  if (!runDir) {
+    return;
+  }
+
+  let output: { sourcePath: string; content: string };
+  try {
+    output = await readCliResultOutput(runDir);
+  } catch (error: any) {
+    vscode.window.showErrorMessage(error.message);
+    return;
+  }
+
+  const status = await vscode.window.showQuickPick(
+    ["WAITING_FOR_REVIEW", "VERIFIED", "FAILED_VERIFICATION", "CANCELLED"],
+    {
+      title: "Captured run status",
+      placeHolder: "Use WAITING_FOR_REVIEW unless verification has actually happened",
+    }
+  );
+  if (!status) {
+    return;
+  }
+
+  const workspaceRoot = inferWorkspaceRootFromRunDir(runDir);
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage("Cannot infer workspace root for this run.");
+    return;
+  }
+
+  const changedFiles = await listChangedFilesFromGit(workspaceRoot);
+  const summary = await vscode.window.showInputBox({
+    prompt: "Captured result summary",
+    value: `Captured CLI output from ${path.basename(output.sourcePath)}.`,
+  });
+  if (summary === undefined) {
+    return;
+  }
+
+  const outputExcerpt = compactCapturedOutput(output.sourcePath, output.content);
+  const verification =
+    [
+      `Output source: ${output.sourcePath}`,
+      `Detected changed files: ${changedFiles.length}`,
+      "",
+      outputExcerpt,
+    ].join("\n");
+  const residualRisk =
+    status === "VERIFIED"
+      ? "Captured output was explicitly marked verified by the user."
+      : "Captured output still needs human review or a separate verification command before memory promotion.";
+
+  const result = await rustClient.request("recordRunLedgerResult", {
+    run_dir: runDir,
+    status,
+    summary,
+    changed_files: changedFiles,
+    commands: [
+      {
+        command: "ClearLoop: Capture CLI Agent Result",
+        status: "captured",
+        summary: `Captured ${path.basename(output.sourcePath)} into the run ledger.`,
+        output_path: output.sourcePath,
+      },
+    ],
+    verification,
+    residual_risk: residualRisk,
+    memory_gate: {
+      decision: "not_evaluated",
+      reason: "Captured CLI output still requires review before reusable memory promotion.",
+    },
+  });
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  channel.show(true);
+  channel.appendLine("Captured CLI agent result:");
+  channel.appendLine(JSON.stringify(result, null, 2));
+
+  const resultPath = result?.artifacts?.find((artifact: string) =>
+    artifact.endsWith(`${path.sep}result.md`) || artifact.endsWith("/result.md")
+  );
+  if (resultPath) {
+    const doc = await vscode.workspace.openTextDocument(resultPath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  vscode.window.showInformationMessage(`ClearLoop captured CLI result: ${status}`);
 }
 
 async function recordCliRunLedgerResult() {
@@ -536,6 +754,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("clearLoop.createCliHandoff", createCliHandoffSmoke),
 
     vscode.commands.registerCommand("clearLoop.startCliAgentRun", startCliAgentRun),
+
+    vscode.commands.registerCommand("clearLoop.captureCliAgentResult", captureCliAgentResult),
 
     vscode.commands.registerCommand("clearLoop.recordRunLedgerResult", recordCliRunLedgerResult),
 
