@@ -70,6 +70,14 @@ changes.json contains reported changed_files
 verification.md and result.md are rewritten with the recorded result
 ```
 
+For a minimal extension runner smoke, verify the command palette exposes:
+
+```text
+ClearLoop: Start CLI Agent Run
+```
+
+It should infer the active run directory from an open file under `.bestqa/agent-runs/<run>/`, record `RUNNING`, append `command_recorded`, and launch a visible PowerShell terminal.
+
 ## Engineering Rules
 
 - Keep UI, extension host, Rust backend, and webview concerns separated.

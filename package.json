@@ -67,6 +67,7 @@
       { "command": "clearLoop.analyzeFile", "title": "ClearLoop: Analyze Current File" },
       { "command": "clearLoop.analyzeChanges", "title": "ClearLoop: Analyze Changes" },
       { "command": "clearLoop.createCliHandoff", "title": "ClearLoop: Create CLI Agent Handoff Smoke" },
+      { "command": "clearLoop.startCliAgentRun", "title": "ClearLoop: Start CLI Agent Run" },
       { "command": "clearLoop.recordRunLedgerResult", "title": "ClearLoop: Record Run Ledger Result" },
       { "command": "clearLoop.codexLogin", "title": "ClearLoop: Codex Login" },
       { "command": "clearLoop.codexStatus", "title": "ClearLoop: Codex Login Status" }

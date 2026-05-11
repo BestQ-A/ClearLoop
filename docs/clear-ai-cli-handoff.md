@@ -40,6 +40,14 @@ ClearLoop: Record Run Ledger Result
 
 The command updates the existing run directory with `recordRunLedgerResult` and opens `result.md`.
 
+To start a controlled visible CLI run from an existing handoff, use:
+
+```text
+ClearLoop: Start CLI Agent Run
+```
+
+This opens a VS Code terminal, runs a command that pipes `handoff.md` into Codex CLI or Claude Code, and records `RUNNING` plus the launched command in the same ledger. The terminal remains visible so the human can interrupt it.
+
 ## Why This Exists
 
 The project goal is Clear AI:
@@ -63,6 +71,7 @@ Run ledger v1 adds appendable evidence and command streams:
 - `changes.json` is empty until an agent records changed files;
 - `verification.md` is the human-readable verification gate.
 - `recordRunLedgerResult` turns a handoff into a reviewable result by updating `manifest.json`, `changes.json`, `verification.md`, `result.md`, `commands.jsonl`, and `evidence.jsonl`.
+- `Start CLI Agent Run` records a controlled launch before result capture, rather than pretending the run has completed.
 
 ## Next Step
 

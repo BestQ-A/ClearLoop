@@ -176,6 +176,19 @@ function inferRunDirFromActiveDocument(): string | undefined {
   return undefined;
 }
 
+function inferWorkspaceRootFromRunDir(runDir: string): string | undefined {
+  const parts = runDir.split(/[\\/]+/);
+  const bestqaIndex = parts.lastIndexOf(".bestqa");
+  if (bestqaIndex > 0 && parts[bestqaIndex + 1] === "agent-runs") {
+    return parts.slice(0, bestqaIndex).join(path.sep);
+  }
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function quotePowerShellLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 function parseListInput(value: string | undefined): string[] {
   if (!value) {
     return [];
@@ -184,6 +197,141 @@ function parseListInput(value: string | undefined): string[] {
     .split(/[,\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function buildCliRunCommand(agentId: string, workspaceRoot: string, runDir: string): string {
+  const handoffPath = path.join(runDir, "handoff.md");
+  const logPath = path.join(runDir, "cli-output.log");
+  const lastMessagePath = path.join(runDir, "last-message.md");
+  const input = `Get-Content -Raw -LiteralPath ${quotePowerShellLiteral(handoffPath)}`;
+  const tee = `2>&1 | Tee-Object -FilePath ${quotePowerShellLiteral(logPath)}`;
+
+  if (agentId === "codex-cli" || agentId === "codex") {
+    return [
+      input,
+      "|",
+      "codex exec",
+      "-C",
+      quotePowerShellLiteral(workspaceRoot),
+      "-s workspace-write",
+      "-a on-request",
+      "--output-last-message",
+      quotePowerShellLiteral(lastMessagePath),
+      "-",
+      tee,
+    ].join(" ");
+  }
+
+  if (agentId === "claude-code") {
+    return [
+      input,
+      "|",
+      "claude -p",
+      "--permission-mode default",
+      "--add-dir",
+      quotePowerShellLiteral(workspaceRoot),
+      "--output-format text",
+      tee,
+    ].join(" ");
+  }
+
+  return [
+    input,
+    "|",
+    agentId,
+    tee,
+  ].join(" ");
+}
+
+async function startCliAgentRun() {
+  if (!rustClient) {
+    vscode.window.showErrorMessage("ClearLoop server is not running.");
+    return;
+  }
+
+  const runDir = await vscode.window.showInputBox({
+    prompt: "Run ledger directory to execute",
+    value: inferRunDirFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\agent-runs\<run>`,
+  });
+  if (!runDir) {
+    return;
+  }
+
+  const handoffPath = path.join(runDir, "handoff.md");
+  try {
+    await fs.access(handoffPath);
+  } catch {
+    vscode.window.showErrorMessage(`handoff.md not found: ${handoffPath}`);
+    return;
+  }
+
+  const cfg = vscode.workspace.getConfiguration("clearLoop");
+  const defaultAgent = cfg.get<string>("executionAgent") || "claude-code";
+  const agentId = await vscode.window.showQuickPick(
+    ["codex-cli", "claude-code", "codex", "custom"],
+    {
+      title: "CLI agent to start",
+      placeHolder: defaultAgent,
+    }
+  );
+  if (!agentId) {
+    return;
+  }
+
+  const workspaceRoot = inferWorkspaceRootFromRunDir(runDir);
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage("Cannot infer workspace root for this run.");
+    return;
+  }
+
+  const defaultCommand = buildCliRunCommand(agentId, workspaceRoot, runDir);
+  const command = await vscode.window.showInputBox({
+    prompt: "Command to run in a controlled terminal",
+    value: defaultCommand,
+  });
+  if (!command) {
+    return;
+  }
+
+  await rustClient.request("recordRunLedgerResult", {
+    run_dir: runDir,
+    status: "RUNNING",
+    summary: `Started ${agentId} from ClearLoop controlled terminal.`,
+    changed_files: [],
+    commands: [
+      {
+        command,
+        status: "started",
+        summary: "Started by ClearLoop: Start CLI Agent Run.",
+        output_path: path.join(runDir, "cli-output.log"),
+      },
+    ],
+    verification: "Execution started. Verification is pending.",
+    residual_risk: "Agent execution is still running or awaiting result capture.",
+    memory_gate: {
+      decision: "not_evaluated",
+      reason: "Execution has not reached verification.",
+    },
+  });
+
+  const terminal = vscode.window.createTerminal({
+    name: `ClearLoop ${agentId}`,
+    cwd: workspaceRoot,
+    shellPath: "powershell.exe",
+  });
+  terminal.sendText(command);
+  terminal.show();
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  channel.show(true);
+  channel.appendLine("Started CLI agent run:");
+  channel.appendLine(command);
+  channel.appendLine(`Run ledger: ${runDir}`);
+
+  vscode.window.showInformationMessage(`ClearLoop started ${agentId}. Record the result after it finishes.`);
 }
 
 async function recordCliRunLedgerResult() {
@@ -386,6 +534,8 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand("clearLoop.createCliHandoff", createCliHandoffSmoke),
+
+    vscode.commands.registerCommand("clearLoop.startCliAgentRun", startCliAgentRun),
 
     vscode.commands.registerCommand("clearLoop.recordRunLedgerResult", recordCliRunLedgerResult),
 
