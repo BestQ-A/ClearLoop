@@ -101,13 +101,27 @@ This is a gate, not promotion. It only creates a candidate when the run ledger i
 
 The file is marked `candidate_only`. It must not be treated as durable memory until a human or a later explicit promotion workflow accepts it.
 
+To create an editable review record before promotion, use:
+
+```text
+ClearLoop: Prepare Memory Review
+```
+
+This writes a review Markdown file under:
+
+```text
+<workspace>/.bestqa/memory-reviews/<timestamp>-<candidate>.md
+```
+
+The review file keeps the source candidate and source run links, then exposes editable fields for `Decision`, `Accepted by`, `Human Review Note`, reusable claim, applicability conditions, and the success/failure boundary. A candidate should normally be promoted from this reviewed file, not directly from the raw candidate.
+
 To promote a reviewed candidate into local reusable memory, use:
 
 ```text
 ClearLoop: Promote Memory Candidate
 ```
 
-This command still does not write into the BestQ-A core directly. It requires an extracted `candidate_only` file, source run evidence under `.bestqa/agent-runs/`, and explicit human acceptance with a review note. Promotion writes:
+This command still does not write into the BestQ-A core directly. It requires an extracted `candidate_only` file, source run evidence under `.bestqa/agent-runs/`, and explicit human acceptance with a review note. When invoked from a review file, `Decision` must be `accepted`, `Accepted by` must be filled, and `Human Review Note` must no longer be `TODO`. Promotion writes:
 
 ```text
 <workspace>/.bestqa/memory/promoted/<timestamp>-<candidate>.md
@@ -144,12 +158,13 @@ Run ledger v1 adds appendable evidence and command streams:
 - `Capture CLI Agent Result` turns terminal output into reviewable evidence without promoting it to reusable memory.
 - `Verify Run Result` turns a verification command into pass/fail evidence before memory promotion.
 - `Extract Memory Candidate` turns a verified run into a reviewable candidate only; unverified, incomplete, or explicitly blocked runs must stay local.
+- `Prepare Memory Review` creates the editable human review record between candidate extraction and promotion.
 - `Promote Memory Candidate` records explicit human acceptance before a candidate becomes local reusable memory.
 
 ## Next Step
 
 After this smoke path is stable, the runner can tighten memory-gate and review UX:
 
-- better review UI for editing the reusable claim before promotion;
 - export/import contracts for BestQ-A durable memory;
+- visual review UI for editing `.bestqa/memory-reviews/` records;
 - visible run timeline across preflight, start, capture, and verify.

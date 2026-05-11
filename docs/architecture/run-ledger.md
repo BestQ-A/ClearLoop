@@ -150,10 +150,11 @@ The first local promotion workflow is intentionally file-based:
 
 ```text
 ClearLoop: Extract Memory Candidate
+ClearLoop: Prepare Memory Review
 ClearLoop: Promote Memory Candidate
 ```
 
-`Extract Memory Candidate` produces a `candidate_only` Markdown file under `.bestqa/memory-candidates/`. `Promote Memory Candidate` requires explicit human acceptance and writes a local promoted-memory Markdown file under `.bestqa/memory/promoted/`, appends `.bestqa/memory/promotions.jsonl`, updates the source run status to `PROMOTED_TO_MEMORY`, and appends a `memory_promoted` evidence event. This remains a ClearLoop-local contract until a separate BestQ-A import/export contract exists.
+`Extract Memory Candidate` produces a `candidate_only` Markdown file under `.bestqa/memory-candidates/`. `Prepare Memory Review` produces an editable human review record under `.bestqa/memory-reviews/` so the reusable claim, applicability conditions, and success/failure boundary can be corrected before promotion. `Promote Memory Candidate` requires explicit human acceptance and writes a local promoted-memory Markdown file under `.bestqa/memory/promoted/`, appends `.bestqa/memory/promotions.jsonl`, updates the source run status to `PROMOTED_TO_MEMORY`, and appends a `memory_promoted` evidence event. This remains a ClearLoop-local contract until a separate BestQ-A import/export contract exists.
 
 ## Session Refactoring Boundary
 

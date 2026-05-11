@@ -72,6 +72,7 @@
       { "command": "clearLoop.captureCliAgentResult", "title": "ClearLoop: Capture CLI Agent Result" },
       { "command": "clearLoop.verifyRunResult", "title": "ClearLoop: Verify Run Result" },
       { "command": "clearLoop.extractMemoryCandidate", "title": "ClearLoop: Extract Memory Candidate" },
+      { "command": "clearLoop.prepareMemoryReview", "title": "ClearLoop: Prepare Memory Review" },
       { "command": "clearLoop.promoteMemoryCandidate", "title": "ClearLoop: Promote Memory Candidate" },
       { "command": "clearLoop.recordRunLedgerResult", "title": "ClearLoop: Record Run Ledger Result" },
       { "command": "clearLoop.codexLogin", "title": "ClearLoop: Codex Login" },

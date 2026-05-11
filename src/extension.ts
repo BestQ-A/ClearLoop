@@ -203,6 +203,23 @@ function inferCandidatePathFromActiveDocument(): string | undefined {
   return undefined;
 }
 
+function inferReviewPathFromActiveDocument(): string | undefined {
+  const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
+  if (!activePath) {
+    return undefined;
+  }
+  const parts = activePath.split(/[\\/]+/);
+  const bestqaIndex = parts.lastIndexOf(".bestqa");
+  if (
+    bestqaIndex >= 0 &&
+    parts[bestqaIndex + 1] === "memory-reviews" &&
+    parts[bestqaIndex + 2]
+  ) {
+    return activePath;
+  }
+  return undefined;
+}
+
 function inferWorkspaceRootFromBestqaPath(targetPath: string, folderName: string): string | undefined {
   const parts = targetPath.split(/[\\/]+/);
   const bestqaIndex = parts.lastIndexOf(".bestqa");
@@ -442,8 +459,24 @@ type MemoryCandidateReport = {
   evidence_paths: string[];
 };
 
+type PrepareMemoryReviewOptions = {
+  candidatePath?: string;
+  openReview?: boolean;
+  showOutput?: boolean;
+};
+
+type PrepareMemoryReviewReport = {
+  status: "created" | "blocked";
+  candidate_path: string;
+  source_run?: string;
+  review_path?: string;
+  reasons: string[];
+  evidence_paths: string[];
+};
+
 type PromoteMemoryCandidateOptions = {
   candidatePath?: string;
+  reviewPath?: string;
   accepted?: boolean;
   acceptedBy?: string;
   reviewNote?: string;
@@ -454,6 +487,7 @@ type PromoteMemoryCandidateOptions = {
 type PromoteMemoryCandidateReport = {
   status: "promoted" | "blocked";
   candidate_path: string;
+  review_path?: string;
   source_run?: string;
   memory_path?: string;
   promotion_record_path?: string;
@@ -1401,13 +1435,116 @@ function extractBacktickField(markdown: string, label: string): string | undefin
   return undefined;
 }
 
+function extractMarkdownSection(markdown: string, heading: string): string | undefined {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const headingLine = `## ${heading}`;
+  const start = lines.findIndex((line) => line.trim() === headingLine);
+  if (start < 0) {
+    return undefined;
+  }
+  const body: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index].startsWith("## ")) {
+      break;
+    }
+    body.push(lines[index]);
+  }
+  return body.join("\n").trim();
+}
+
+function normalizeWorkspacePath(workspaceRoot: string, value: string): string {
+  return path.normalize(path.isAbsolute(value) ? value : path.resolve(workspaceRoot, value));
+}
+
+function isTodoValue(value: string | undefined): boolean {
+  const trimmed = (value || "").trim();
+  return !trimmed || /^todo\b/i.test(trimmed);
+}
+
+function candidateRequiredSectionReasons(candidateMarkdown: string): string[] {
+  const requiredSections = [
+    { label: "memory candidate heading", pattern: /^# Memory Candidate/m },
+    { label: "candidate_only status", pattern: /Status:\s*`candidate_only`/ },
+    { label: "reusable claim", pattern: /^## Reusable Claim/m },
+    { label: "success/failure boundary", pattern: /^## Success And Failure Boundary/m },
+    { label: "verification evidence", pattern: /^## Verification Evidence/m },
+    { label: "human review checklist", pattern: /^## Human Review Checklist/m },
+  ];
+  return requiredSections
+    .filter((section) => !section.pattern.test(candidateMarkdown))
+    .map((section) => `Candidate is missing ${section.label}.`);
+}
+
+function sourceRunFromCandidate(workspaceRoot: string, candidateMarkdown: string): string | undefined {
+  const sourceRunRaw = extractBacktickField(candidateMarkdown, "Source run");
+  return sourceRunRaw ? normalizeWorkspacePath(workspaceRoot, sourceRunRaw) : undefined;
+}
+
+function renderMemoryReviewMarkdown(params: {
+  candidatePath: string;
+  sourceRun: string;
+  workspaceRoot: string;
+  candidateMarkdown: string;
+  createdAt: string;
+}): string {
+  const reusableClaim = extractMarkdownSection(params.candidateMarkdown, "Reusable Claim") || "TODO: Write the reusable claim.";
+  const applicability = extractMarkdownSection(params.candidateMarkdown, "Applicability Conditions") || "TODO: Define applicability conditions.";
+  const boundary = extractMarkdownSection(params.candidateMarkdown, "Success And Failure Boundary") || "TODO: Define the success/failure boundary.";
+
+  return [
+    "# Memory Promotion Review",
+    "",
+    "Status: `review_pending`",
+    "Schema: `clearloop.memory-review.v1`",
+    "",
+    `Created at: ${params.createdAt}`,
+    `Source candidate: \`${relativeOrAbsolute(params.workspaceRoot, params.candidatePath)}\``,
+    `Source run: \`${relativeOrAbsolute(params.workspaceRoot, params.sourceRun)}\``,
+    "",
+    "## Review Decision",
+    "",
+    "Decision: `pending`",
+    "Accepted by: `TODO`",
+    "",
+    "## Human Review Note",
+    "",
+    "TODO: Explain why this should or should not become reusable memory.",
+    "",
+    "## Reusable Claim",
+    "",
+    reusableClaim,
+    "",
+    "## Applicability Conditions",
+    "",
+    applicability,
+    "",
+    "## Success And Failure Boundary",
+    "",
+    boundary,
+    "",
+    "## Review Checklist",
+    "",
+    "- [ ] The claim is reusable beyond this one run.",
+    "- [ ] The verification evidence covers the intended behavior.",
+    "- [ ] Failure conditions are explicit enough to prevent overgeneralization.",
+    "- [ ] Residual risk is acceptable.",
+    "",
+    "## Source Candidate Snapshot",
+    "",
+    params.candidateMarkdown.trim(),
+    "",
+  ].join("\n");
+}
+
 function renderPromotedMemoryMarkdown(params: {
   candidatePath: string;
+  reviewPath?: string;
   sourceRun: string;
   memoryPath: string;
   promotedAt: string;
   acceptedBy: string;
   reviewNote: string;
+  reviewMarkdown?: string;
   candidateMarkdown: string;
   workspaceRoot: string;
 }): string {
@@ -1420,6 +1557,7 @@ function renderPromotedMemoryMarkdown(params: {
     `Promoted at: ${params.promotedAt}`,
     `Accepted by: ${params.acceptedBy}`,
     `Source candidate: \`${relativeOrAbsolute(params.workspaceRoot, params.candidatePath)}\``,
+    ...(params.reviewPath ? [`Source review: \`${relativeOrAbsolute(params.workspaceRoot, params.reviewPath)}\``] : []),
     `Source run: \`${relativeOrAbsolute(params.workspaceRoot, params.sourceRun)}\``,
     `Memory path: \`${relativeOrAbsolute(params.workspaceRoot, params.memoryPath)}\``,
     "",
@@ -1433,6 +1571,14 @@ function renderPromotedMemoryMarkdown(params: {
     "- Reuse requires matching the source run context, evidence paths, and verification meaning.",
     "- Do not treat this as hidden model reasoning; only recorded evidence and human acceptance are durable.",
     "",
+    ...(params.reviewMarkdown
+      ? [
+          "## Review Record Snapshot",
+          "",
+          params.reviewMarkdown.trim(),
+          "",
+        ]
+      : []),
     "## Candidate Evidence Snapshot",
     "",
     params.candidateMarkdown.trim(),
@@ -1440,11 +1586,9 @@ function renderPromotedMemoryMarkdown(params: {
   ].join("\n");
 }
 
-async function promoteMemoryCandidate(
-  options?: PromoteMemoryCandidateOptions
-): Promise<PromoteMemoryCandidateReport | undefined> {
+async function prepareMemoryReview(options?: PrepareMemoryReviewOptions): Promise<PrepareMemoryReviewReport | undefined> {
   const candidateInput = options?.candidatePath ?? await vscode.window.showInputBox({
-    prompt: "Memory candidate file to promote",
+    prompt: "Memory candidate file to prepare for review",
     value: inferCandidatePathFromActiveDocument(),
     placeHolder: String.raw`<workspace>\.bestqa\memory-candidates\<candidate>.md`,
   });
@@ -1455,13 +1599,12 @@ async function promoteMemoryCandidate(
   const candidatePath = cleanFsPathInput(candidateInput);
   const workspaceRoot = inferWorkspaceRootFromBestqaPath(candidatePath, "memory-candidates");
   const initialEvidencePaths = [candidatePath];
-
   const blocked = (
     reasons: string[],
     evidencePaths: string[] = initialEvidencePaths,
     sourceRun?: string
-  ): PromoteMemoryCandidateReport => {
-    vscode.window.showWarningMessage(`Memory promotion blocked: ${reasons[0]}`);
+  ): PrepareMemoryReviewReport => {
+    vscode.window.showWarningMessage(`Memory review blocked: ${reasons[0]}`);
     return {
       status: "blocked",
       candidate_path: candidatePath,
@@ -1487,31 +1630,224 @@ async function promoteMemoryCandidate(
     return blocked([`Cannot read memory candidate: ${unknownErrorMessage(error)}`]);
   }
 
-  const reasons: string[] = [];
-  const requiredSections = [
-    { label: "memory candidate heading", pattern: /^# Memory Candidate/m },
-    { label: "candidate_only status", pattern: /Status:\s*`candidate_only`/ },
-    { label: "reusable claim", pattern: /^## Reusable Claim/m },
-    { label: "success/failure boundary", pattern: /^## Success And Failure Boundary/m },
-    { label: "verification evidence", pattern: /^## Verification Evidence/m },
-    { label: "human review checklist", pattern: /^## Human Review Checklist/m },
-  ];
-  for (const section of requiredSections) {
-    if (!section.pattern.test(candidateMarkdown)) {
-      reasons.push(`Candidate is missing ${section.label}.`);
-    }
-  }
-
-  const sourceRunRaw = extractBacktickField(candidateMarkdown, "Source run");
-  const sourceRun = sourceRunRaw
-    ? path.normalize(path.isAbsolute(sourceRunRaw) ? sourceRunRaw : path.resolve(workspaceRoot, sourceRunRaw))
-    : undefined;
+  const reasons = candidateRequiredSectionReasons(candidateMarkdown);
+  const sourceRun = sourceRunFromCandidate(workspaceRoot, candidateMarkdown);
   if (!sourceRun) {
     reasons.push("Candidate is missing Source run.");
   }
 
   const evidencePaths = sourceRun
     ? [
+        candidatePath,
+        path.join(sourceRun, "manifest.json"),
+        path.join(sourceRun, "evidence.jsonl"),
+        path.join(sourceRun, "verification.md"),
+        path.join(sourceRun, "result.md"),
+      ]
+    : initialEvidencePaths;
+
+  if (sourceRun) {
+    const runRoot = path.join(workspaceRoot, ".bestqa", "agent-runs");
+    if (!isPathInside(runRoot, sourceRun)) {
+      reasons.push("Source run is outside the workspace agent-runs directory.");
+    }
+    for (const evidencePath of evidencePaths) {
+      if (!(await pathExists(evidencePath))) {
+        reasons.push(`Missing source evidence: ${evidencePath}`);
+      }
+    }
+  }
+
+  if (sourceRun && reasons.length === 0) {
+    try {
+      const sourceManifest = await readJsonFile(path.join(sourceRun, "manifest.json"));
+      const status = String(sourceManifest.status || "unknown");
+      const memoryGateDecision = String(sourceManifest.memory_gate?.decision || "");
+      if (status !== "VERIFIED") {
+        reasons.push(`Source run status is ${status}, not VERIFIED.`);
+      }
+      if (memoryGateDecision.toLowerCase() === "blocked") {
+        reasons.push("Source run memory gate is blocked.");
+      }
+    } catch (error) {
+      reasons.push(`Cannot read source run manifest: ${unknownErrorMessage(error)}`);
+    }
+  }
+
+  if (reasons.length > 0) {
+    return blocked(reasons, evidencePaths, sourceRun);
+  }
+
+  const createdAt = new Date().toISOString();
+  const reviewDir = path.join(workspaceRoot, ".bestqa", "memory-reviews");
+  await fs.mkdir(reviewDir, { recursive: true });
+  const reviewPath = path.join(
+    reviewDir,
+    `${timestampForFile(new Date(createdAt))}-${sanitizeFileSegment(path.basename(candidatePath, ".md"))}.md`
+  );
+  await fs.writeFile(
+    reviewPath,
+    renderMemoryReviewMarkdown({
+      candidatePath,
+      sourceRun: sourceRun!,
+      workspaceRoot,
+      candidateMarkdown,
+      createdAt,
+    }),
+    "utf8"
+  );
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  if (options?.showOutput !== false) {
+    channel.show(true);
+  }
+  channel.appendLine(`Memory promotion review created: ${reviewPath}`);
+
+  if (options?.openReview !== false) {
+    const doc = await vscode.workspace.openTextDocument(reviewPath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.showInformationMessage("ClearLoop memory review created.");
+  }
+
+  return {
+    status: "created",
+    candidate_path: candidatePath,
+    source_run: sourceRun,
+    review_path: reviewPath,
+    reasons: [],
+    evidence_paths: evidencePaths,
+  };
+}
+
+async function promoteMemoryCandidate(
+  options?: PromoteMemoryCandidateOptions
+): Promise<PromoteMemoryCandidateReport | undefined> {
+  const reviewInput = options?.reviewPath ?? inferReviewPathFromActiveDocument();
+  let reviewPath: string | undefined;
+  let reviewMarkdown: string | undefined;
+  let reviewCandidatePath: string | undefined;
+  let reviewAccepted: boolean | undefined;
+  let reviewAcceptedBy: string | undefined;
+  let reviewNoteFromFile: string | undefined;
+  let reviewSourceRun: string | undefined;
+  let workspaceRootFromReview: string | undefined;
+
+  if (reviewInput) {
+    reviewPath = path.normalize(cleanFsPathInput(reviewInput));
+    workspaceRootFromReview = inferWorkspaceRootFromBestqaPath(reviewPath, "memory-reviews");
+    if (!workspaceRootFromReview) {
+      vscode.window.showWarningMessage("Memory promotion blocked: Review must be under <workspace>/.bestqa/memory-reviews/.");
+      return {
+        status: "blocked",
+        candidate_path: options?.candidatePath ?? reviewPath,
+        review_path: reviewPath,
+        reasons: ["Review must be under <workspace>/.bestqa/memory-reviews/."],
+        evidence_paths: [reviewPath],
+      };
+    }
+    const reviewRoot = path.join(workspaceRootFromReview, ".bestqa", "memory-reviews");
+    if (!isPathInside(reviewRoot, reviewPath)) {
+      vscode.window.showWarningMessage("Memory promotion blocked: Review path is outside the workspace memory-reviews directory.");
+      return {
+        status: "blocked",
+        candidate_path: options?.candidatePath ?? reviewPath,
+        review_path: reviewPath,
+        reasons: ["Review path is outside the workspace memory-reviews directory."],
+        evidence_paths: [reviewPath],
+      };
+    }
+    try {
+      reviewMarkdown = await fs.readFile(reviewPath, "utf8");
+    } catch (error) {
+      vscode.window.showWarningMessage(`Memory promotion blocked: Cannot read memory review: ${unknownErrorMessage(error)}`);
+      return {
+        status: "blocked",
+        candidate_path: options?.candidatePath ?? reviewPath,
+        review_path: reviewPath,
+        reasons: [`Cannot read memory review: ${unknownErrorMessage(error)}`],
+        evidence_paths: [reviewPath],
+      };
+    }
+
+    const candidateFromReview = extractBacktickField(reviewMarkdown, "Source candidate");
+    const sourceRunFromReview = extractBacktickField(reviewMarkdown, "Source run");
+    reviewCandidatePath = candidateFromReview
+      ? normalizeWorkspacePath(workspaceRootFromReview, candidateFromReview)
+      : undefined;
+    reviewSourceRun = sourceRunFromReview
+      ? normalizeWorkspacePath(workspaceRootFromReview, sourceRunFromReview)
+      : undefined;
+    reviewAccepted = extractBacktickField(reviewMarkdown, "Decision")?.toLowerCase() === "accepted";
+    reviewAcceptedBy = extractBacktickField(reviewMarkdown, "Accepted by");
+    reviewNoteFromFile = extractMarkdownSection(reviewMarkdown, "Human Review Note");
+  }
+
+  const candidateInput = options?.candidatePath ?? reviewCandidatePath ?? await vscode.window.showInputBox({
+    prompt: "Memory candidate file to promote",
+    value: inferCandidatePathFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\memory-candidates\<candidate>.md`,
+  });
+  if (!candidateInput) {
+    return;
+  }
+
+  const candidatePath = path.normalize(cleanFsPathInput(candidateInput));
+  const workspaceRoot = inferWorkspaceRootFromBestqaPath(candidatePath, "memory-candidates");
+  const initialEvidencePaths = reviewPath ? [reviewPath, candidatePath] : [candidatePath];
+
+  const blocked = (
+    reasons: string[],
+    evidencePaths: string[] = initialEvidencePaths,
+    sourceRun?: string
+  ): PromoteMemoryCandidateReport => {
+    vscode.window.showWarningMessage(`Memory promotion blocked: ${reasons[0]}`);
+    return {
+      status: "blocked",
+      candidate_path: candidatePath,
+      review_path: reviewPath,
+      source_run: sourceRun,
+      reasons,
+      evidence_paths: evidencePaths,
+    };
+  };
+
+  if (!workspaceRoot) {
+    return blocked(["Candidate must be under <workspace>/.bestqa/memory-candidates/."]);
+  }
+  if (workspaceRootFromReview && workspaceRootFromReview !== workspaceRoot) {
+    return blocked(["Review and candidate must belong to the same workspace."]);
+  }
+
+  const candidateRoot = path.join(workspaceRoot, ".bestqa", "memory-candidates");
+  if (!isPathInside(candidateRoot, candidatePath)) {
+    return blocked(["Candidate path is outside the workspace memory-candidates directory."]);
+  }
+
+  let candidateMarkdown: string;
+  try {
+    candidateMarkdown = await fs.readFile(candidatePath, "utf8");
+  } catch (error) {
+    return blocked([`Cannot read memory candidate: ${unknownErrorMessage(error)}`]);
+  }
+
+  const reasons: string[] = candidateRequiredSectionReasons(candidateMarkdown);
+  if (reviewCandidatePath && path.normalize(reviewCandidatePath) !== candidatePath) {
+    reasons.push("Review Source candidate does not match the candidate being promoted.");
+  }
+
+  const sourceRun = sourceRunFromCandidate(workspaceRoot, candidateMarkdown);
+  if (!sourceRun) {
+    reasons.push("Candidate is missing Source run.");
+  }
+  if (reviewSourceRun && sourceRun && path.normalize(reviewSourceRun) !== path.normalize(sourceRun)) {
+    reasons.push("Review Source run does not match the candidate Source run.");
+  }
+
+  const evidencePaths = sourceRun
+    ? [
+        ...(reviewPath ? [reviewPath] : []),
         candidatePath,
         path.join(sourceRun, "manifest.json"),
         path.join(sourceRun, "evidence.jsonl"),
@@ -1558,7 +1894,7 @@ async function promoteMemoryCandidate(
     return blocked(reasons, evidencePaths, sourceRun);
   }
 
-  let accepted = options?.accepted;
+  let accepted = options?.accepted ?? reviewAccepted;
   if (accepted === undefined) {
     const choice = await vscode.window.showQuickPick(
       [
@@ -1584,7 +1920,9 @@ async function promoteMemoryCandidate(
     return blocked(["Human acceptance was not granted."], evidencePaths, sourceRun);
   }
 
-  const acceptedBy = options?.acceptedBy ?? await vscode.window.showInputBox({
+  const acceptedBy = options?.acceptedBy ??
+    (!isTodoValue(reviewAcceptedBy) ? reviewAcceptedBy : undefined) ??
+    await vscode.window.showInputBox({
     prompt: "Accepted by",
     value: os.userInfo().username || "human",
   });
@@ -1592,7 +1930,9 @@ async function promoteMemoryCandidate(
     return blocked(["Accepted-by identity is required."], evidencePaths, sourceRun);
   }
 
-  const reviewNote = options?.reviewNote ?? await vscode.window.showInputBox({
+  const reviewNote = options?.reviewNote ??
+    (!isTodoValue(reviewNoteFromFile) ? reviewNoteFromFile : undefined) ??
+    await vscode.window.showInputBox({
     prompt: "Human review note",
     value: "Accepted as reusable memory because the evidence and verification boundary were reviewed.",
   });
@@ -1609,11 +1949,13 @@ async function promoteMemoryCandidate(
   const promotionRecordPath = path.join(workspaceRoot, ".bestqa", "memory", "promotions.jsonl");
   const memoryMarkdown = renderPromotedMemoryMarkdown({
     candidatePath,
+    reviewPath,
     sourceRun: sourceRun!,
     memoryPath,
     promotedAt,
     acceptedBy: acceptedBy.trim(),
     reviewNote: reviewNote.trim(),
+    reviewMarkdown,
     candidateMarkdown,
     workspaceRoot,
   });
@@ -1622,6 +1964,7 @@ async function promoteMemoryCandidate(
     type: "memory_promoted",
     schema_version: "clearloop.memory-promotion.v1",
     candidate_path: candidatePath,
+    review_path: reviewPath,
     source_run: sourceRun,
     memory_path: memoryPath,
     accepted_by: acceptedBy.trim(),
@@ -1645,6 +1988,7 @@ async function promoteMemoryCandidate(
           reason: reviewNote.trim(),
           promoted_at: promotedAt,
           accepted_by: acceptedBy.trim(),
+          review_path: reviewPath,
           memory_path: memoryPath,
         },
       }, null, 2)}\n`,
@@ -1672,6 +2016,7 @@ async function promoteMemoryCandidate(
   return {
     status: "promoted",
     candidate_path: candidatePath,
+    review_path: reviewPath,
     source_run: sourceRun,
     memory_path: memoryPath,
     promotion_record_path: promotionRecordPath,
@@ -1890,6 +2235,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("clearLoop.verifyRunResult", verifyRunResult),
 
     vscode.commands.registerCommand("clearLoop.extractMemoryCandidate", extractMemoryCandidate),
+
+    vscode.commands.registerCommand("clearLoop.prepareMemoryReview", prepareMemoryReview),
 
     vscode.commands.registerCommand("clearLoop.promoteMemoryCandidate", promoteMemoryCandidate),
 

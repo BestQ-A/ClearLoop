@@ -143,6 +143,10 @@ suite("ClearLoop CLI agent preflight", () => {
       "clearLoop.extractMemoryCandidate command should be registered"
     );
     assert.ok(
+      commands.includes("clearLoop.prepareMemoryReview"),
+      "clearLoop.prepareMemoryReview command should be registered"
+    );
+    assert.ok(
       commands.includes("clearLoop.promoteMemoryCandidate"),
       "clearLoop.promoteMemoryCandidate command should be registered"
     );
@@ -173,9 +177,22 @@ suite("ClearLoop CLI agent preflight", () => {
     assert.match(candidate, /result_recorded/);
     assert.match(candidate, /verification\.md/);
 
-    const declined = await vscode.commands.executeCommand<any>("clearLoop.promoteMemoryCandidate", {
+    const review = await vscode.commands.executeCommand<any>("clearLoop.prepareMemoryReview", {
       candidatePath: created.candidate_path,
-      accepted: false,
+      openReview: false,
+      showOutput: false,
+    });
+    assert.strictEqual(review.status, "created");
+    assert.ok(review.review_path, "review path should be returned");
+
+    const pendingReview = await fs.readFile(review.review_path, "utf8");
+    assert.match(pendingReview, /# Memory Promotion Review/);
+    assert.match(pendingReview, /review_pending/);
+    assert.match(pendingReview, /Decision: `pending`/);
+    assert.match(pendingReview, /Source candidate:/);
+
+    const declined = await vscode.commands.executeCommand<any>("clearLoop.promoteMemoryCandidate", {
+      reviewPath: review.review_path,
       openMemory: false,
       showOutput: false,
     });
@@ -185,11 +202,20 @@ suite("ClearLoop CLI agent preflight", () => {
       "promotion should require explicit human acceptance"
     );
 
+    await fs.writeFile(
+      review.review_path,
+      pendingReview
+        .replace("Decision: `pending`", "Decision: `accepted`")
+        .replace("Accepted by: `TODO`", "Accepted by: `extension-host-review`")
+        .replace(
+          "TODO: Explain why this should or should not become reusable memory.",
+          "Accepted because the editable review preserved the verification boundary."
+        ),
+      "utf8"
+    );
+
     const promoted = await vscode.commands.executeCommand<any>("clearLoop.promoteMemoryCandidate", {
-      candidatePath: created.candidate_path,
-      accepted: true,
-      acceptedBy: "extension-host-smoke",
-      reviewNote: "Accepted because the smoke run has explicit verification and evidence boundaries.",
+      reviewPath: review.review_path,
       openMemory: false,
       showOutput: false,
     });
@@ -200,20 +226,22 @@ suite("ClearLoop CLI agent preflight", () => {
     const memory = await fs.readFile(promoted.memory_path, "utf8");
     assert.match(memory, /# Promoted Memory/);
     assert.match(memory, /promoted_memory/);
-    assert.match(memory, /extension-host-smoke/);
+    assert.match(memory, /Source review:/);
+    assert.match(memory, /extension-host-review/);
     assert.match(memory, /CLEARLOOP_MEMORY_SMOKE_OK/);
 
     const promotedManifest = JSON.parse(await fs.readFile(path.join(verifiedRunDir, "manifest.json"), "utf8"));
     assert.strictEqual(promotedManifest.status, "PROMOTED_TO_MEMORY");
     assert.strictEqual(promotedManifest.memory_gate.decision, "promoted");
-    assert.strictEqual(promotedManifest.memory_gate.accepted_by, "extension-host-smoke");
+    assert.strictEqual(promotedManifest.memory_gate.accepted_by, "extension-host-review");
+    assert.strictEqual(promotedManifest.memory_gate.review_path, review.review_path);
 
     const promotedEvidence = await fs.readFile(path.join(verifiedRunDir, "evidence.jsonl"), "utf8");
     assert.match(promotedEvidence, /memory_promoted/);
 
     const promotionIndex = await fs.readFile(promoted.promotion_record_path, "utf8");
     assert.match(promotionIndex, /memory_promoted/);
-    assert.match(promotionIndex, /extension-host-smoke/);
+    assert.match(promotionIndex, /extension-host-review/);
 
     const unverifiedRunDir = await createRunLedger(workspaceRoot, `memory-blocked-${Date.now()}`);
     const blocked = await vscode.commands.executeCommand<any>("clearLoop.extractMemoryCandidate", {
