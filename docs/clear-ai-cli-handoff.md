@@ -32,6 +32,23 @@ The extension will:
 - write the run ledger v1 scaffold under the current workspace;
 - open `handoff.md` for inspection.
 
+Before starting an agent run, check local CLI readiness with:
+
+```text
+ClearLoop: Check CLI Agents
+```
+
+The command supports two modes:
+
+- `Quick preflight` checks `PATH` and `--help` without making a model call. It can prove an agent is installed, but readiness remains `unknown`.
+- `Full smoke` also runs a minimal real model call. It can mark an agent `usable`, or `installed-but-blocked` when auth, policy, network, or runtime behavior prevents execution.
+
+Reports are written to:
+
+```text
+<workspace>/.bestqa/cli-agent-checks/<timestamp>.json
+```
+
 To record a completed or partially completed CLI run, use:
 
 ```text
@@ -84,6 +101,7 @@ Run ledger v1 adds appendable evidence and command streams:
 - `commands.jsonl` starts with the suggested launch command;
 - `changes.json` is empty until an agent records changed files;
 - `verification.md` is the human-readable verification gate.
+- `Check CLI Agents` records local CLI readiness as `usable`, `installed-but-blocked`, `missing`, or `unknown`.
 - `recordRunLedgerResult` turns a handoff into a reviewable result by updating `manifest.json`, `changes.json`, `verification.md`, `result.md`, `commands.jsonl`, and `evidence.jsonl`.
 - `Start CLI Agent Run` records a controlled launch before result capture, rather than pretending the run has completed.
 - `Capture CLI Agent Result` turns terminal output into reviewable evidence without promoting it to reusable memory.

@@ -86,6 +86,14 @@ Get-Content -Raw -LiteralPath <handoff.md> | codex exec -C <workspace> -s worksp
 
 Do not add unsupported approval flags such as `-a on-request`; verify CLI flags live when changing this path.
 
+For CLI readiness, verify the command palette exposes:
+
+```text
+ClearLoop: Check CLI Agents
+```
+
+It should offer `Quick preflight` and `Full smoke`, check both `codex` and `claude`, and write a diagnostic report under `.bestqa/cli-agent-checks/`. Report readiness as `usable`, `installed-but-blocked`, `missing`, or `unknown`; do not claim a CLI is usable from `--help` alone.
+
 For a minimal completion capture smoke, verify the command palette exposes:
 
 ```text

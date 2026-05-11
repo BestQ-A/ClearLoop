@@ -23,6 +23,9 @@ bin/
 *.db-shm
 *.db-wal
 
+# Local ClearLoop runtime records
+.bestqa/
+
 # Environment / secrets
 .env
 webview-ui/.env

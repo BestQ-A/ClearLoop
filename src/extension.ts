@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as os from "os";
 import { spawn } from "child_process";
 import { createViewProvider } from "./webview/ViewProvider";
 import { RustClient } from "./rustclient/RustClient";
@@ -199,7 +200,7 @@ function parseListInput(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function runCommandText(command: string, args: string[], cwd: string): Promise<string> {
+function runCommandText(command: string, args: string[], cwd: string, timeoutMs?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
@@ -208,6 +209,19 @@ function runCommandText(command: string, args: string[], cwd: string): Promise<s
     });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          if (child.pid && process.platform === "win32") {
+            spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+              windowsHide: true,
+            });
+          } else {
+            child.kill();
+          }
+        }, timeoutMs)
+      : undefined;
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString("utf8");
     });
@@ -215,10 +229,20 @@ function runCommandText(command: string, args: string[], cwd: string): Promise<s
       stderr += chunk.toString("utf8");
     });
     child.on("error", (err) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
       reject(err);
     });
     child.on("close", (code) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
       const output = `${stdout}${stderr}`;
+      if (timedOut) {
+        reject(new Error(`Command timed out after ${timeoutMs}ms\n${output}`));
+        return;
+      }
       if (code === 0) {
         resolve(output);
       } else {
@@ -314,6 +338,254 @@ async function listChangedFilesFromGit(workspaceRoot: string): Promise<string[]>
   } catch {
     return [];
   }
+}
+
+type CliCheckMode = "quick" | "full-smoke";
+type CliReadiness = "usable" | "installed-but-blocked" | "missing" | "unknown";
+
+type CliCheckStep = {
+  ok: boolean;
+  output?: string;
+  error?: string;
+};
+
+type CliAgentCheck = {
+  agent_id: "codex" | "claude";
+  readiness: CliReadiness;
+  executable_paths: string[];
+  path_check: CliCheckStep;
+  help_check: CliCheckStep;
+  smoke_check?: CliCheckStep;
+  smoke_command?: string;
+  boundary: string;
+};
+
+function summarizeOutput(value: string | undefined, maxChars = 4000): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `[tail ${maxChars} chars of ${normalized.length}]\n${normalized.slice(-maxChars)}`;
+}
+
+async function runCheckStep(command: string, args: string[], cwd: string, timeoutMs: number): Promise<CliCheckStep> {
+  try {
+    return {
+      ok: true,
+      output: summarizeOutput(await runCommandText(command, args, cwd, timeoutMs)),
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      error: summarizeOutput(error.message || String(error)),
+    };
+  }
+}
+
+function executablePathsFromWhere(output: string | undefined): string[] {
+  return (output || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function timestampForFile(date = new Date()): string {
+  return date.toISOString().replace(/[:.]/g, "-");
+}
+
+async function runCodexSmoke(workspaceRoot: string): Promise<CliCheckStep> {
+  const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "clearloop-codex-check-"));
+  const lastMessagePath = path.join(runDir, "last-message.md");
+  const prompt = "Reply exactly CLEARLOOP_CODEX_PREFLIGHT_OK. Do not inspect files. Do not modify files. Do not run commands.";
+  try {
+    const output = await runCommandText(
+      "codex",
+      [
+        "exec",
+        "-C",
+        workspaceRoot,
+        "-s",
+        "read-only",
+        "--output-last-message",
+        lastMessagePath,
+        prompt,
+      ],
+      workspaceRoot,
+      120000
+    );
+    const lastMessage = (await pathExists(lastMessagePath))
+      ? await fs.readFile(lastMessagePath, "utf8")
+      : "";
+    const combined = `${output}\n${lastMessage}`;
+    return {
+      ok: combined.includes("CLEARLOOP_CODEX_PREFLIGHT_OK"),
+      output: summarizeOutput(combined),
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      error: summarizeOutput(error.message || String(error)),
+    };
+  }
+}
+
+async function runClaudeSmoke(workspaceRoot: string): Promise<CliCheckStep> {
+  const prompt = "Reply exactly CLEARLOOP_CLAUDE_PREFLIGHT_OK. Do not inspect files. Do not modify files. Do not run commands.";
+  try {
+    const output = await runCommandText(
+      "claude",
+      [
+        "-p",
+        "--permission-mode",
+        "default",
+        "--add-dir",
+        workspaceRoot,
+        "--output-format",
+        "text",
+        prompt,
+      ],
+      workspaceRoot,
+      120000
+    );
+    return {
+      ok: output.includes("CLEARLOOP_CLAUDE_PREFLIGHT_OK"),
+      output: summarizeOutput(output),
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      error: summarizeOutput(error.message || String(error)),
+    };
+  }
+}
+
+async function checkCliAgent(
+  agentId: "codex" | "claude",
+  mode: CliCheckMode,
+  workspaceRoot: string
+): Promise<CliAgentCheck> {
+  const command = agentId === "codex" ? "codex" : "claude";
+  const pathCheck = await runCheckStep("where.exe", [command], workspaceRoot, 10000);
+  const executablePaths = executablePathsFromWhere(pathCheck.output);
+  if (!pathCheck.ok || executablePaths.length === 0) {
+    return {
+      agent_id: agentId,
+      readiness: "missing",
+      executable_paths: [],
+      path_check: pathCheck,
+      help_check: { ok: false, error: "Skipped because executable was not found." },
+      boundary: "Executable is missing from PATH.",
+    };
+  }
+
+  const helpArgs = agentId === "codex" ? ["exec", "--help"] : ["--help"];
+  const helpCheck = await runCheckStep(command, helpArgs, workspaceRoot, 15000);
+  if (!helpCheck.ok) {
+    return {
+      agent_id: agentId,
+      readiness: "installed-but-blocked",
+      executable_paths: executablePaths,
+      path_check: pathCheck,
+      help_check: helpCheck,
+      boundary: "Executable exists, but help command failed.",
+    };
+  }
+
+  if (mode === "quick") {
+    return {
+      agent_id: agentId,
+      readiness: "unknown",
+      executable_paths: executablePaths,
+      path_check: pathCheck,
+      help_check: helpCheck,
+      boundary: "Executable and help surface are present, but real model smoke was not run.",
+    };
+  }
+
+  const smokeCheck = agentId === "codex"
+    ? await runCodexSmoke(workspaceRoot)
+    : await runClaudeSmoke(workspaceRoot);
+  const smokeCommand = agentId === "codex"
+    ? "codex exec -C <workspace> -s read-only --output-last-message <last-message.md> <prompt>"
+    : "claude -p --permission-mode default --add-dir <workspace> --output-format text <prompt>";
+
+  return {
+    agent_id: agentId,
+    readiness: smokeCheck.ok ? "usable" : "installed-but-blocked",
+    executable_paths: executablePaths,
+    path_check: pathCheck,
+    help_check: helpCheck,
+    smoke_check: smokeCheck,
+    smoke_command: smokeCommand,
+    boundary: smokeCheck.ok
+      ? "Real model smoke completed successfully."
+      : "Executable and help surface are present, but real model smoke failed.",
+  };
+}
+
+async function checkCliAgents() {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage("Open a workspace before checking CLI agents.");
+    return;
+  }
+
+  const selectedMode = await vscode.window.showQuickPick(
+    [
+      {
+        label: "Quick preflight",
+        description: "PATH + --help only; no model call",
+        mode: "quick" as CliCheckMode,
+      },
+      {
+        label: "Full smoke",
+        description: "PATH + --help + real minimal model call",
+        mode: "full-smoke" as CliCheckMode,
+      },
+    ],
+    {
+      title: "ClearLoop CLI agent check mode",
+      placeHolder: "Use Full smoke when validating actual execution readiness",
+    }
+  );
+  if (!selectedMode) {
+    return;
+  }
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  channel.show(true);
+  channel.appendLine(`Checking CLI agents with mode: ${selectedMode.label}`);
+
+  const startedAt = new Date();
+  const agents: CliAgentCheck[] = [];
+  for (const agentId of ["codex", "claude"] as const) {
+    channel.appendLine(`Checking ${agentId}...`);
+    const result = await checkCliAgent(agentId, selectedMode.mode, workspaceRoot);
+    agents.push(result);
+    channel.appendLine(`${agentId}: ${result.readiness} - ${result.boundary}`);
+  }
+
+  const report = {
+    schema_version: "clearloop.cli-agent-check.v1",
+    checked_at: startedAt.toISOString(),
+    workspace_root: workspaceRoot,
+    mode: selectedMode.mode,
+    agents,
+  };
+  const reportDir = path.join(workspaceRoot, ".bestqa", "cli-agent-checks");
+  await fs.mkdir(reportDir, { recursive: true });
+  const reportPath = path.join(reportDir, `${timestampForFile(startedAt)}.json`);
+  await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+
+  channel.appendLine(`CLI agent check report: ${reportPath}`);
+  const doc = await vscode.workspace.openTextDocument(reportPath);
+  await vscode.window.showTextDocument(doc, { preview: false });
+  vscode.window.showInformationMessage(`ClearLoop CLI agent check complete: ${selectedMode.label}`);
 }
 
 function buildCliRunCommand(agentId: string, workspaceRoot: string, runDir: string): string {
@@ -751,6 +1023,8 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand("clearLoop.createCliHandoff", createCliHandoffSmoke),
+
+    vscode.commands.registerCommand("clearLoop.checkCliAgents", checkCliAgents),
 
     vscode.commands.registerCommand("clearLoop.startCliAgentRun", startCliAgentRun),
 
