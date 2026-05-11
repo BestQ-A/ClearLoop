@@ -360,6 +360,22 @@ type CliAgentCheck = {
   boundary: string;
 };
 
+type CliAgentCheckCommandOptions = {
+  mode?: CliCheckMode;
+  workspaceRoot?: string;
+  openReport?: boolean;
+  showOutput?: boolean;
+};
+
+type CliAgentCheckReport = {
+  schema_version: "clearloop.cli-agent-check.v1";
+  checked_at: string;
+  workspace_root: string;
+  mode: CliCheckMode;
+  agents: CliAgentCheck[];
+  report_path: string;
+};
+
 function summarizeOutput(value: string | undefined, maxChars = 4000): string | undefined {
   if (!value) {
     return undefined;
@@ -526,31 +542,36 @@ async function checkCliAgent(
   };
 }
 
-async function checkCliAgents() {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+async function checkCliAgents(options?: CliAgentCheckCommandOptions): Promise<CliAgentCheckReport | undefined> {
+  const workspaceRoot = options?.workspaceRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
     vscode.window.showErrorMessage("Open a workspace before checking CLI agents.");
     return;
   }
 
-  const selectedMode = await vscode.window.showQuickPick(
-    [
-      {
-        label: "Quick preflight",
-        description: "PATH + --help only; no model call",
-        mode: "quick" as CliCheckMode,
-      },
-      {
-        label: "Full smoke",
-        description: "PATH + --help + real minimal model call",
-        mode: "full-smoke" as CliCheckMode,
-      },
-    ],
-    {
-      title: "ClearLoop CLI agent check mode",
-      placeHolder: "Use Full smoke when validating actual execution readiness",
-    }
-  );
+  const selectedMode = options?.mode
+    ? {
+        label: options.mode === "quick" ? "Quick preflight" : "Full smoke",
+        mode: options.mode,
+      }
+    : await vscode.window.showQuickPick(
+        [
+          {
+            label: "Quick preflight",
+            description: "PATH + --help only; no model call",
+            mode: "quick" as CliCheckMode,
+          },
+          {
+            label: "Full smoke",
+            description: "PATH + --help + real minimal model call",
+            mode: "full-smoke" as CliCheckMode,
+          },
+        ],
+        {
+          title: "ClearLoop CLI agent check mode",
+          placeHolder: "Use Full smoke when validating actual execution readiness",
+        }
+      );
   if (!selectedMode) {
     return;
   }
@@ -558,7 +579,9 @@ async function checkCliAgents() {
   const channel =
     clearAiOutputChannel ??
     (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
-  channel.show(true);
+  if (options?.showOutput !== false) {
+    channel.show(true);
+  }
   channel.appendLine(`Checking CLI agents with mode: ${selectedMode.label}`);
 
   const startedAt = new Date();
@@ -571,7 +594,7 @@ async function checkCliAgents() {
   }
 
   const report = {
-    schema_version: "clearloop.cli-agent-check.v1",
+    schema_version: "clearloop.cli-agent-check.v1" as const,
     checked_at: startedAt.toISOString(),
     workspace_root: workspaceRoot,
     mode: selectedMode.mode,
@@ -580,12 +603,19 @@ async function checkCliAgents() {
   const reportDir = path.join(workspaceRoot, ".bestqa", "cli-agent-checks");
   await fs.mkdir(reportDir, { recursive: true });
   const reportPath = path.join(reportDir, `${timestampForFile(startedAt)}.json`);
-  await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  const reportWithPath: CliAgentCheckReport = {
+    ...report,
+    report_path: reportPath,
+  };
+  await fs.writeFile(reportPath, `${JSON.stringify(reportWithPath, null, 2)}\n`, "utf8");
 
   channel.appendLine(`CLI agent check report: ${reportPath}`);
-  const doc = await vscode.workspace.openTextDocument(reportPath);
-  await vscode.window.showTextDocument(doc, { preview: false });
-  vscode.window.showInformationMessage(`ClearLoop CLI agent check complete: ${selectedMode.label}`);
+  if (options?.openReport !== false) {
+    const doc = await vscode.workspace.openTextDocument(reportPath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.showInformationMessage(`ClearLoop CLI agent check complete: ${selectedMode.label}`);
+  }
+  return reportWithPath;
 }
 
 function buildCliRunCommand(agentId: string, workspaceRoot: string, runDir: string): string {

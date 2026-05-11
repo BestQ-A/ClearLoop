@@ -94,6 +94,14 @@ ClearLoop: Check CLI Agents
 
 It should offer `Quick preflight` and `Full smoke`, check both `codex` and `claude`, and write a diagnostic report under `.bestqa/cli-agent-checks/`. Report readiness as `usable`, `installed-but-blocked`, `missing`, or `unknown`; do not claim a CLI is usable from `--help` alone.
 
+For automated Extension Host coverage of this path, run:
+
+```powershell
+npx vscode-test --fail-zero
+```
+
+The current smoke test lives at `src/test/checkCliAgents.test.ts`; it verifies command registration, non-interactive quick preflight execution, report file creation, and the rule that quick preflight must not claim `usable`.
+
 For a minimal completion capture smoke, verify the command palette exposes:
 
 ```text
