@@ -32,6 +32,14 @@ The extension will:
 - write the run ledger v1 scaffold under the current workspace;
 - open `handoff.md` for inspection.
 
+To record a completed or partially completed CLI run, use:
+
+```text
+ClearLoop: Record Run Ledger Result
+```
+
+The command updates the existing run directory with `recordRunLedgerResult` and opens `result.md`.
+
 ## Why This Exists
 
 The project goal is Clear AI:
@@ -54,6 +62,7 @@ Run ledger v1 adds appendable evidence and command streams:
 - `commands.jsonl` starts with the suggested launch command;
 - `changes.json` is empty until an agent records changed files;
 - `verification.md` is the human-readable verification gate.
+- `recordRunLedgerResult` turns a handoff into a reviewable result by updating `manifest.json`, `changes.json`, `verification.md`, `result.md`, `commands.jsonl`, and `evidence.jsonl`.
 
 ## Next Step
 
@@ -62,5 +71,5 @@ After this smoke path is stable, the runner can add controlled execution adapter
 - Codex CLI adapter;
 - Claude Code CLI adapter;
 - explicit approval gates before file edits;
-- result capture into `result.md`;
-- verification command capture before marking work complete.
+- automatic result capture into `result.md`;
+- automatic verification command capture before marking work complete.

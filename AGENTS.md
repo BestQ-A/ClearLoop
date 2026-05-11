@@ -60,6 +60,16 @@ For a minimal backend smoke, send JSON-RPC to `codesail-server` and verify that 
 .bestqa/agent-runs/<run>/result.md
 ```
 
+For result capture, send JSON-RPC `recordRunLedgerResult` against that run directory and verify:
+
+```text
+manifest.json status changes from WAITING_FOR_EXECUTION
+evidence.jsonl contains result_recorded
+commands.jsonl contains command_recorded when commands are supplied
+changes.json contains reported changed_files
+verification.md and result.md are rewritten with the recorded result
+```
+
 ## Engineering Rules
 
 - Keep UI, extension host, Rust backend, and webview concerns separated.

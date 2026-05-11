@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs/promises";
+import * as path from "path";
 import { spawn } from "child_process";
 import { createViewProvider } from "./webview/ViewProvider";
 import { RustClient } from "./rustclient/RustClient";
@@ -158,6 +159,151 @@ async function createCliHandoffSmoke() {
   );
 }
 
+function inferRunDirFromActiveDocument(): string | undefined {
+  const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
+  if (!activePath) {
+    return undefined;
+  }
+  const parts = activePath.split(/[\\/]+/);
+  const bestqaIndex = parts.lastIndexOf(".bestqa");
+  if (
+    bestqaIndex >= 0 &&
+    parts[bestqaIndex + 1] === "agent-runs" &&
+    parts[bestqaIndex + 2]
+  ) {
+    return parts.slice(0, bestqaIndex + 3).join(path.sep);
+  }
+  return undefined;
+}
+
+function parseListInput(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function recordCliRunLedgerResult() {
+  if (!rustClient) {
+    vscode.window.showErrorMessage("ClearLoop server is not running.");
+    return;
+  }
+
+  const runDir = await vscode.window.showInputBox({
+    prompt: "Run ledger directory to update",
+    value: inferRunDirFromActiveDocument(),
+    placeHolder: String.raw`<workspace>\.bestqa\agent-runs\<run>`,
+  });
+  if (!runDir) {
+    return;
+  }
+
+  const status = await vscode.window.showQuickPick(
+    ["WAITING_FOR_REVIEW", "VERIFIED", "FAILED_VERIFICATION", "CANCELLED"],
+    {
+      title: "Run Ledger status",
+      placeHolder: "Pick the honest current status",
+    }
+  );
+  if (!status) {
+    return;
+  }
+
+  const summary = await vscode.window.showInputBox({
+    prompt: "Execution summary",
+    value: "Agent output was recorded for review.",
+  });
+  if (summary === undefined) {
+    return;
+  }
+
+  const changedFilesRaw = await vscode.window.showInputBox({
+    prompt: "Changed files, comma-separated",
+    placeHolder: "src/example.ts, tests/example.test.ts",
+  });
+  if (changedFilesRaw === undefined) {
+    return;
+  }
+
+  const command = await vscode.window.showInputBox({
+    prompt: "Verification or execution command to record (optional)",
+    placeHolder: "npm test",
+  });
+  if (command === undefined) {
+    return;
+  }
+
+  const commandStatus = command
+    ? await vscode.window.showQuickPick(["passed", "failed", "not_run", "unknown"], {
+        title: "Command status",
+      })
+    : undefined;
+  if (command && !commandStatus) {
+    return;
+  }
+
+  const verification = await vscode.window.showInputBox({
+    prompt: "Verification note",
+    value:
+      status === "VERIFIED"
+        ? "Verification passed."
+        : "Verification has not passed yet.",
+  });
+  if (verification === undefined) {
+    return;
+  }
+
+  const residualRisk = await vscode.window.showInputBox({
+    prompt: "Residual risk",
+    value: status === "VERIFIED" ? "No residual risk recorded." : "Needs review.",
+  });
+  if (residualRisk === undefined) {
+    return;
+  }
+
+  const result = await rustClient.request("recordRunLedgerResult", {
+    run_dir: runDir,
+    status,
+    summary,
+    changed_files: parseListInput(changedFilesRaw),
+    commands: command
+      ? [
+          {
+            command,
+            status: commandStatus,
+            summary: verification,
+          },
+        ]
+      : [],
+    verification,
+    residual_risk: residualRisk,
+    memory_gate: {
+      decision: "not_evaluated",
+      reason: "Result capture does not promote memory directly.",
+    },
+  });
+
+  const channel =
+    clearAiOutputChannel ??
+    (clearAiOutputChannel = vscode.window.createOutputChannel("BestQ Clear AI"));
+  channel.show(true);
+  channel.appendLine("Recorded Run Ledger result:");
+  channel.appendLine(JSON.stringify(result, null, 2));
+
+  const resultPath = result?.artifacts?.find((artifact: string) =>
+    artifact.endsWith(`${path.sep}result.md`) || artifact.endsWith("/result.md")
+  );
+  if (resultPath) {
+    const doc = await vscode.workspace.openTextDocument(resultPath);
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+
+  vscode.window.showInformationMessage(`ClearLoop Run Ledger updated: ${status}`);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   // Start Rust binary
   rustClient = new RustClient();
@@ -240,6 +386,8 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand("clearLoop.createCliHandoff", createCliHandoffSmoke),
+
+    vscode.commands.registerCommand("clearLoop.recordRunLedgerResult", recordCliRunLedgerResult),
 
     // Codex CLI 集成：登录 / 状态查看（对应 LlmProvider=codex）
     vscode.commands.registerCommand("clearLoop.codexLogin", () => {

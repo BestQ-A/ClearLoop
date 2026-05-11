@@ -1,7 +1,8 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::protocol::agents::*;
 use crate::protocol::epic::ExecutionStatus;
@@ -413,6 +414,312 @@ fn create_cli_handoff_scaffold_in(
     })
 }
 
+pub fn record_run_ledger_result(
+    params: RunLedgerRecordParams,
+) -> Result<RunLedgerRecordResult, String> {
+    let workspace_root = workspace_root();
+    record_run_ledger_result_in(&workspace_root, params)
+}
+
+fn record_run_ledger_result_in(
+    workspace_root: &Path,
+    params: RunLedgerRecordParams,
+) -> Result<RunLedgerRecordResult, String> {
+    let run_dir = resolve_run_dir(workspace_root, &params.run_dir)?;
+    let manifest_path = run_dir.join("manifest.json");
+    let evidence_path = run_dir.join("evidence.jsonl");
+    let commands_path = run_dir.join("commands.jsonl");
+    let changes_path = run_dir.join("changes.json");
+    let verification_path = run_dir.join("verification.md");
+    let result_path = run_dir.join("result.md");
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let status = normalize_ledger_status(&params.status)?;
+    let mut manifest: Value = serde_json::from_str(
+        &fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("读取 manifest.json 失败 {}: {}", manifest_path.display(), e))?,
+    )
+    .map_err(|e| format!("解析 manifest.json 失败 {}: {}", manifest_path.display(), e))?;
+
+    let run_id = manifest
+        .get("run_id")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+
+    manifest["status"] = json!(status);
+    manifest["updated_at"] = json!(now.clone());
+    manifest["result_summary"] = json!(&params.summary);
+    manifest["workflow"]["stage"] = json!(ledger_stage_for_status(status));
+    if let Some(memory_gate) = &params.memory_gate {
+        manifest["memory_gate"] = json!({
+            "decision": memory_gate.decision,
+            "reason": memory_gate.reason,
+        });
+    }
+
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest)
+            .map_err(|e| format!("序列化 manifest.json 失败: {}", e))?,
+    )
+    .map_err(|e| format!("写入 manifest.json 失败 {}: {}", manifest_path.display(), e))?;
+
+    let changes = json!({
+        "schema_version": "run-ledger.v1",
+        "status": status,
+        "changed_files": &params.changed_files,
+        "updated_at": now.clone(),
+        "note": if params.changed_files.is_empty() {
+            "No changed files were reported."
+        } else {
+            "Changed files were reported by the agent or runner."
+        },
+    });
+    fs::write(
+        &changes_path,
+        serde_json::to_string_pretty(&changes)
+            .map_err(|e| format!("序列化 changes.json 失败: {}", e))?,
+    )
+    .map_err(|e| format!("写入 changes.json 失败 {}: {}", changes_path.display(), e))?;
+
+    for command in &params.commands {
+        append_jsonl(
+            &commands_path,
+            json!({
+                "ts": now.clone(),
+                "type": "command_recorded",
+                "run_id": &run_id,
+                "command": &command.command,
+                "status": &command.status,
+                "summary": &command.summary,
+                "output_path": &command.output_path,
+            }),
+        )?;
+    }
+
+    append_jsonl(
+        &evidence_path,
+        json!({
+            "ts": now.clone(),
+            "type": "result_recorded",
+            "run_id": &run_id,
+            "status": status,
+            "summary": &params.summary,
+            "changed_files_count": params.changed_files.len(),
+            "command_count": params.commands.len(),
+        }),
+    )?;
+    if let Some(verification) = &params.verification {
+        append_jsonl(
+            &evidence_path,
+            json!({
+                "ts": now.clone(),
+                "type": "verification_recorded",
+                "run_id": &run_id,
+                "status": status,
+                "summary": verification,
+            }),
+        )?;
+    }
+
+    fs::write(
+        &verification_path,
+        render_recorded_verification_markdown(&params, status),
+    )
+    .map_err(|e| {
+        format!(
+            "写入 verification.md 失败 {}: {}",
+            verification_path.display(),
+            e
+        )
+    })?;
+    fs::write(
+        &result_path,
+        render_recorded_result_markdown(&params, status),
+    )
+    .map_err(|e| format!("写入 result.md 失败 {}: {}", result_path.display(), e))?;
+
+    Ok(RunLedgerRecordResult {
+        run_dir: run_dir.display().to_string(),
+        status: status.to_string(),
+        changed_files_count: params.changed_files.len(),
+        command_count: params.commands.len(),
+        artifacts: vec![
+            manifest_path.display().to_string(),
+            evidence_path.display().to_string(),
+            commands_path.display().to_string(),
+            changes_path.display().to_string(),
+            verification_path.display().to_string(),
+            result_path.display().to_string(),
+        ],
+    })
+}
+
+fn resolve_run_dir(workspace_root: &Path, run_dir: &str) -> Result<PathBuf, String> {
+    let raw = PathBuf::from(run_dir);
+    let candidate = if raw.is_absolute() {
+        raw
+    } else {
+        workspace_root.join(raw)
+    };
+    let canonical_run_dir = fs::canonicalize(&candidate)
+        .map_err(|e| format!("run_dir 不存在或不可访问 {}: {}", candidate.display(), e))?;
+    let ledger_root = workspace_root.join(".bestqa").join("agent-runs");
+    let canonical_ledger_root = fs::canonicalize(&ledger_root).map_err(|e| {
+        format!(
+            "Run Ledger 根目录不存在或不可访问 {}: {}",
+            ledger_root.display(),
+            e
+        )
+    })?;
+    if !canonical_run_dir.starts_with(&canonical_ledger_root) {
+        return Err(format!(
+            "拒绝写入工作区 Run Ledger 之外的目录: {}",
+            canonical_run_dir.display()
+        ));
+    }
+    for required in [
+        "manifest.json",
+        "evidence.jsonl",
+        "commands.jsonl",
+        "changes.json",
+        "verification.md",
+        "result.md",
+    ] {
+        let path = canonical_run_dir.join(required);
+        if !path.exists() {
+            return Err(format!("Run Ledger 缺少必要文件 {}", path.display()));
+        }
+    }
+    Ok(canonical_run_dir)
+}
+
+fn normalize_ledger_status(status: &str) -> Result<&'static str, String> {
+    match status.trim().to_ascii_uppercase().as_str() {
+        "WAITING_FOR_REVIEW" => Ok("WAITING_FOR_REVIEW"),
+        "VERIFIED" => Ok("VERIFIED"),
+        "FAILED_VERIFICATION" => Ok("FAILED_VERIFICATION"),
+        "CANCELLED" => Ok("CANCELLED"),
+        "RUNNING" => Ok("RUNNING"),
+        other => Err(format!(
+            "不支持的 Run Ledger 状态 '{}'; expected RUNNING, WAITING_FOR_REVIEW, VERIFIED, FAILED_VERIFICATION, or CANCELLED",
+            other
+        )),
+    }
+}
+
+fn ledger_stage_for_status(status: &str) -> &'static str {
+    match status {
+        "RUNNING" => "execution",
+        "WAITING_FOR_REVIEW" => "review",
+        "VERIFIED" => "verification",
+        "FAILED_VERIFICATION" => "verification",
+        "CANCELLED" => "cancelled",
+        _ => "result",
+    }
+}
+
+fn append_jsonl(path: &Path, event: Value) -> Result<(), String> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("打开 JSONL 文件失败 {}: {}", path.display(), e))?;
+    writeln!(file, "{}", event)
+        .map_err(|e| format!("追加 JSONL 事件失败 {}: {}", path.display(), e))
+}
+
+fn render_recorded_verification_markdown(params: &RunLedgerRecordParams, status: &str) -> String {
+    let mut md = String::new();
+    md.push_str("# Verification\n\n");
+    md.push_str(&format!("Status: `{}`\n\n", status));
+    md.push_str("## Result\n\n");
+    md.push_str(
+        params
+            .verification
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("No verification detail was recorded."),
+    );
+    md.push_str("\n\n## Commands\n\n");
+    if params.commands.is_empty() {
+        md.push_str("- No commands were recorded.\n");
+    } else {
+        for command in &params.commands {
+            md.push_str(&format!("- `{}` -> `{}`", command.command, command.status));
+            if let Some(summary) = &command.summary {
+                if !summary.trim().is_empty() {
+                    md.push_str(&format!(": {}", summary));
+                }
+            }
+            md.push('\n');
+        }
+    }
+    md.push_str("\n## Residual Risk\n\n");
+    md.push_str(
+        params
+            .residual_risk
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("No residual risk was recorded."),
+    );
+    md.push('\n');
+    md
+}
+
+fn render_recorded_result_markdown(params: &RunLedgerRecordParams, status: &str) -> String {
+    let mut md = String::new();
+    md.push_str("# Agent Result\n\n");
+    md.push_str(&format!("Status: `{}`\n\n", status));
+    md.push_str("## Summary\n\n");
+    md.push_str(if params.summary.trim().is_empty() {
+        "No summary was recorded."
+    } else {
+        params.summary.as_str()
+    });
+    md.push_str("\n\n## Changed Files\n\n");
+    if params.changed_files.is_empty() {
+        md.push_str("- None reported.\n");
+    } else {
+        for path in &params.changed_files {
+            md.push_str(&format!("- `{}`\n", path));
+        }
+    }
+    md.push_str("\n## Commands Run\n\n");
+    if params.commands.is_empty() {
+        md.push_str("- None recorded.\n");
+    } else {
+        for command in &params.commands {
+            md.push_str(&format!("- `{}` -> `{}`", command.command, command.status));
+            if let Some(summary) = &command.summary {
+                if !summary.trim().is_empty() {
+                    md.push_str(&format!(": {}", summary));
+                }
+            }
+            md.push('\n');
+        }
+    }
+    md.push_str("\n## Verification\n\n");
+    md.push_str(
+        params
+            .verification
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("No verification detail was recorded."),
+    );
+    md.push_str("\n\n## Memory Gate\n\n");
+    if let Some(memory_gate) = &params.memory_gate {
+        md.push_str(&format!(
+            "Decision: `{}`\n\nReason: {}\n",
+            memory_gate.decision, memory_gate.reason
+        ));
+    } else {
+        md.push_str("Decision: `not_evaluated`\n\nReason: No verified reusable lesson has been extracted.\n");
+    }
+    md
+}
+
 fn workspace_root() -> PathBuf {
     std::env::var("CODESAIL_WORKSPACE_ROOT")
         .ok()
@@ -705,5 +1012,118 @@ mod tests {
         assert_eq!(scaffold.artifacts.len(), 8);
 
         std::fs::remove_dir_all(&workspace).unwrap();
+    }
+
+    #[test]
+    fn test_record_run_ledger_result_updates_files() {
+        let orchestrator = AgentOrchestrator::new();
+        let payload = HandoffPayload {
+            ticket: Ticket {
+                id: TicketId("t-record".into()),
+                epic_id: EpicId("e-record".into()),
+                title: "Record result smoke".into(),
+                description: "Record a completed run result".into(),
+                status: TicketStatus::Todo,
+                assignee: Some("codex-cli".into()),
+                is_streaming: false,
+                spec_refs: vec![],
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            plan_snapshot: "1. Create scaffold\n2. Record result".into(),
+            context_files: vec![],
+            instructions: "Create the handoff only; do not execute.".into(),
+            verification_prompt: Some("Result must be recorded.".into()),
+        };
+        let agent = orchestrator.get_agent("codex-cli").unwrap();
+        let workspace =
+            std::env::temp_dir().join(format!("clearloop-record-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+        let markdown = orchestrator.format_handoff_markdown(&payload);
+        let scaffold =
+            create_cli_handoff_scaffold_in(&workspace, "exec-record", &payload, agent, &markdown)
+                .unwrap();
+        let run_dir = scaffold.handoff_path.parent().unwrap().to_path_buf();
+
+        let result = record_run_ledger_result_in(
+            &workspace,
+            RunLedgerRecordParams {
+                run_dir: run_dir.display().to_string(),
+                status: "VERIFIED".into(),
+                summary: "Implementation completed and verified.".into(),
+                changed_files: vec!["src/example.ts".into()],
+                commands: vec![RunLedgerCommandRecord {
+                    command: "npm test".into(),
+                    status: "passed".into(),
+                    summary: Some("all tests passed".into()),
+                    output_path: None,
+                }],
+                verification: Some("npm test passed.".into()),
+                residual_risk: Some("No residual risk identified.".into()),
+                memory_gate: Some(RunLedgerMemoryGate {
+                    decision: "not_evaluated".into(),
+                    reason: "Smoke test result only.".into(),
+                }),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.status, "VERIFIED");
+        assert_eq!(result.changed_files_count, 1);
+        assert_eq!(result.command_count, 1);
+        assert_eq!(result.artifacts.len(), 6);
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["status"], "VERIFIED");
+        assert_eq!(manifest["workflow"]["stage"], "verification");
+        assert_eq!(
+            manifest["result_summary"],
+            "Implementation completed and verified."
+        );
+
+        let changes = std::fs::read_to_string(run_dir.join("changes.json")).unwrap();
+        assert!(changes.contains("src/example.ts"));
+        let commands = std::fs::read_to_string(run_dir.join("commands.jsonl")).unwrap();
+        assert!(commands.contains("\"type\":\"command_recorded\""));
+        assert!(commands.contains("npm test"));
+        let evidence = std::fs::read_to_string(run_dir.join("evidence.jsonl")).unwrap();
+        assert!(evidence.contains("\"type\":\"result_recorded\""));
+        assert!(evidence.contains("\"type\":\"verification_recorded\""));
+        let result_md = std::fs::read_to_string(run_dir.join("result.md")).unwrap();
+        assert!(result_md.contains("Implementation completed and verified."));
+        assert!(result_md.contains("src/example.ts"));
+
+        std::fs::remove_dir_all(&workspace).unwrap();
+    }
+
+    #[test]
+    fn test_record_run_ledger_result_rejects_outside_workspace_ledger() {
+        let workspace =
+            std::env::temp_dir().join(format!("clearloop-record-root-{}", uuid::Uuid::new_v4()));
+        let outside =
+            std::env::temp_dir().join(format!("clearloop-record-outside-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(workspace.join(".bestqa").join("agent-runs")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let err = record_run_ledger_result_in(
+            &workspace,
+            RunLedgerRecordParams {
+                run_dir: outside.display().to_string(),
+                status: "VERIFIED".into(),
+                summary: String::new(),
+                changed_files: vec![],
+                commands: vec![],
+                verification: None,
+                residual_risk: None,
+                memory_gate: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.contains("Run Ledger 之外"));
+        std::fs::remove_dir_all(&workspace).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
     }
 }

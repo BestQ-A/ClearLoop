@@ -43,7 +43,7 @@ The first local format is file-based:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": "run-ledger.v1",
   "run_id": "20260510T120000-clearloop-001",
   "workspace": "E:/path/to/workspace",
   "status": "WAITING_FOR_EXECUTION",
@@ -93,6 +93,36 @@ The first local format is file-based:
 ```
 
 `commands.jsonl` records executable commands and outputs at a summary level. Large logs should be written as separate files and referenced by path.
+
+## Result Capture
+
+The local backend exposes JSON-RPC `recordRunLedgerResult` for adapters and the VS Code command palette. It updates the same run directory instead of creating a second source of truth.
+
+Minimal params:
+
+```json
+{
+  "run_dir": "E:/workspace/.bestqa/agent-runs/20260510T120000-codex-cli",
+  "status": "VERIFIED",
+  "summary": "Implementation completed and verified.",
+  "changed_files": ["src/example.ts"],
+  "commands": [
+    {
+      "command": "npm test",
+      "status": "passed",
+      "summary": "all tests passed"
+    }
+  ],
+  "verification": "npm test passed.",
+  "residual_risk": "No residual risk recorded.",
+  "memory_gate": {
+    "decision": "not_evaluated",
+    "reason": "Result capture does not promote memory directly."
+  }
+}
+```
+
+The backend only accepts run directories under the active workspace's `.bestqa/agent-runs/` root. This keeps result capture from becoming an arbitrary filesystem write primitive.
 
 ## Adapter Contract
 

@@ -73,6 +73,49 @@ pub struct HandoffResult {
     pub duration_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunLedgerCommandRecord {
+    pub command: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunLedgerMemoryGate {
+    pub decision: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunLedgerRecordParams {
+    pub run_dir: String,
+    pub status: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub changed_files: Vec<String>,
+    #[serde(default)]
+    pub commands: Vec<RunLedgerCommandRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual_risk: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_gate: Option<RunLedgerMemoryGate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunLedgerRecordResult {
+    pub run_dir: String,
+    pub status: String,
+    pub changed_files_count: usize,
+    pub command_count: usize,
+    pub artifacts: Vec<String>,
+}
+
 /// 模型配置——控制不同工作流步骤使用哪个 LLM
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProfile {

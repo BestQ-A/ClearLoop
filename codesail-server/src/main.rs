@@ -697,6 +697,14 @@ async fn handle_request(
             JsonRpcResponse::ok(id, serde_json::json!({ "markdown": markdown }))
         }
 
+        "recordRunLedgerResult" => {
+            let params: proto_agents::RunLedgerRecordParams = try_parse!(id, req.params);
+            match agents::record_run_ledger_result(params) {
+                Ok(r) => JsonRpcResponse::ok(id, serde_json::to_value(r).unwrap()),
+                Err(e) => JsonRpcResponse::err(id, -32603, e),
+            }
+        }
+
         // === Agents ===
         "listAgents" => {
             let orch = state.read().await.agent_orch.clone();
