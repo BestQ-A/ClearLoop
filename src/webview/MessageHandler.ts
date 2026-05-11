@@ -30,6 +30,26 @@ type MemoryReviewDetail = {
   updatedAt?: string;
 };
 
+type RunLedgerRecord = {
+  path: string;
+  runId: string;
+  title: string;
+  status: string;
+  stage: string;
+  updatedAt: string;
+  resultSummary: string;
+  memoryDecision: string;
+  commandCount: number;
+  evidenceCount: number;
+  changedFilesCount: number;
+  manifest: Record<string, any>;
+  evidence: Record<string, any>[];
+  commands: Record<string, any>[];
+  changes: Record<string, any>;
+  verification: string;
+  result: string;
+};
+
 function workspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
@@ -99,11 +119,24 @@ function memoryReviewsRoot(root: string): string {
   return path.join(root, ".bestqa", "memory-reviews");
 }
 
+function agentRunsRoot(root: string): string {
+  return path.join(root, ".bestqa", "agent-runs");
+}
+
 function assertMemoryReviewPath(root: string, reviewPath: string): string {
   const normalized = path.normalize(cleanFsPathInput(reviewPath));
   const reviewRoot = memoryReviewsRoot(root);
   if (!isPathInside(reviewRoot, normalized)) {
     throw new Error("Review path is outside .bestqa/memory-reviews.");
+  }
+  return normalized;
+}
+
+function assertAgentRunPath(root: string, runPath: string): string {
+  const normalized = path.normalize(cleanFsPathInput(runPath));
+  const runRoot = agentRunsRoot(root);
+  if (!isPathInside(runRoot, normalized)) {
+    throw new Error("Run path is outside .bestqa/agent-runs.");
   }
   return normalized;
 }
@@ -204,6 +237,102 @@ async function listMemoryReviews(root: string): Promise<MemoryReviewDetail[]> {
       })
   );
   return reviews.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+}
+
+async function readOptionalText(filePath: string): Promise<string> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+function parseJsonObject(text: string): Record<string, any> {
+  if (!text.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseJsonl(text: string): Record<string, any>[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        const parsed = JSON.parse(line);
+        return parsed && typeof parsed === "object" ? parsed : { raw: line };
+      } catch {
+        return { parse_error: true, raw: line };
+      }
+    });
+}
+
+async function readRunLedger(root: string, runPath: string, includeBodies: boolean): Promise<RunLedgerRecord> {
+  const safePath = assertAgentRunPath(root, runPath);
+  const manifestText = await readOptionalText(path.join(safePath, "manifest.json"));
+  const evidenceText = await readOptionalText(path.join(safePath, "evidence.jsonl"));
+  const commandsText = await readOptionalText(path.join(safePath, "commands.jsonl"));
+  const changesText = await readOptionalText(path.join(safePath, "changes.json"));
+  const [verification, result] = includeBodies
+    ? await Promise.all([
+        readOptionalText(path.join(safePath, "verification.md")),
+        readOptionalText(path.join(safePath, "result.md")),
+      ])
+    : ["", ""];
+  const manifest = parseJsonObject(manifestText);
+  const changes = parseJsonObject(changesText);
+  const evidence = parseJsonl(evidenceText);
+  const commands = parseJsonl(commandsText);
+  const stat = await fs.stat(safePath);
+  const changedFiles = Array.isArray(changes.changed_files) ? changes.changed_files : [];
+  return {
+    path: safePath,
+    runId: String(manifest.run_id || path.basename(safePath)),
+    title: path.basename(safePath),
+    status: String(manifest.status || "UNKNOWN"),
+    stage: String(manifest.workflow?.stage || ""),
+    updatedAt: String(manifest.updated_at || stat.mtime.toISOString()),
+    resultSummary: String(manifest.result_summary || ""),
+    memoryDecision: String(manifest.memory_gate?.decision || "not_recorded"),
+    commandCount: commands.length,
+    evidenceCount: evidence.length,
+    changedFilesCount: changedFiles.length,
+    manifest,
+    evidence,
+    commands,
+    changes,
+    verification,
+    result,
+  };
+}
+
+async function listRunLedgers(root: string): Promise<RunLedgerRecord[]> {
+  const runRoot = agentRunsRoot(root);
+  let entries: import("fs").Dirent[] = [];
+  try {
+    entries = await fs.readdir(runRoot, { withFileTypes: true });
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  const runs = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => readRunLedger(root, path.join(runRoot, entry.name), false))
+  );
+  return runs.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
 export function createMessageHandler(
@@ -460,6 +589,32 @@ export function createMessageHandler(
           break;
         }
 
+        // --- Run Ledger UI ---
+
+        case "runLedger.list": {
+          const root = workspaceRoot();
+          if (!root) {
+            webview.postMessage({ command: "runLedger.error", text: "Open a workspace before viewing run ledgers." });
+            break;
+          }
+          webview.postMessage({ command: "runLedger.list", data: await listRunLedgers(root) });
+          break;
+        }
+
+        case "runLedger.read": {
+          const root = workspaceRoot();
+          const runPath = message.data?.path;
+          if (!root || typeof runPath !== "string") {
+            webview.postMessage({ command: "runLedger.error", text: "Run path is required." });
+            break;
+          }
+          webview.postMessage({
+            command: "runLedger.detail",
+            data: await readRunLedger(root, runPath, true),
+          });
+          break;
+        }
+
         // --- Legacy ---
 
         case "Analyse File": {
@@ -628,6 +783,11 @@ export function createMessageHandler(
 
         case "openHistory": {
           webview.postMessage({ command: "navigate", path: "/history" });
+          break;
+        }
+
+        case "openRunLedger": {
+          webview.postMessage({ command: "navigate", path: "/runs" });
           break;
         }
 

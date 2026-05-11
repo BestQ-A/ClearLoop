@@ -9,6 +9,7 @@ import ChatView from "./routes/task/ChatView";
 import HistoryView from "./routes/HistoryView";
 import EpicChatView from "./routes/EpicChatView";
 import McpView from "./routes/McpView";
+import RunLedgerView from "./routes/RunLedgerView";
 import MemoryReviewsView from "./routes/MemoryReviewsView";
 import NotificationsView from "./routes/NotificationsView";
 import SettingsLayout from "./routes/settings/SettingsLayout";
@@ -33,6 +34,7 @@ export const router = createMemoryRouter([
       { path: "task/loading/:taskChainId", element: <LoadingView /> },
       { path: "task/chat", element: <ChatView /> },
       { path: "history", element: <HistoryView /> },
+      { path: "runs", element: <RunLedgerView /> },
       { path: "epic/chat/:epicId", element: <EpicChatView /> },
       { path: "mcp", element: <McpView /> },
       { path: "memory-reviews", element: <MemoryReviewsView /> },

@@ -57,6 +57,14 @@ ClearLoop: Record Run Ledger Result
 
 The command updates the existing run directory with `recordRunLedgerResult` and opens `result.md`.
 
+To inspect recorded runs visually, use:
+
+```text
+ClearLoop: Open Run Ledger
+```
+
+This opens the `/runs` webview route. It reads `.bestqa/agent-runs/*` and displays the manifest status, stage, commands, evidence events, verification text, result summary, and memory-gate state. It is a visual reader over the existing run ledger files, not a new persistence layer.
+
 To start a controlled visible CLI run from an existing handoff, use:
 
 ```text
@@ -160,6 +168,7 @@ Run ledger v1 adds appendable evidence and command streams:
 - `commands.jsonl` starts with the suggested launch command;
 - `changes.json` is empty until an agent records changed files;
 - `verification.md` is the human-readable verification gate.
+- `Open Run Ledger` gives a visual reader over the same run files.
 - `Check CLI Agents` records local CLI readiness as `usable`, `installed-but-blocked`, `missing`, or `unknown`.
 - `recordRunLedgerResult` turns a handoff into a reviewable result by updating `manifest.json`, `changes.json`, `verification.md`, `result.md`, `commands.jsonl`, and `evidence.jsonl`.
 - `Start CLI Agent Run` records a controlled launch before result capture, rather than pretending the run has completed.
@@ -171,7 +180,6 @@ Run ledger v1 adds appendable evidence and command streams:
 
 ## Next Step
 
-After this smoke path is stable, the runner can tighten memory-gate and review UX:
+After this smoke path is stable, the runner can tighten cross-project memory flow:
 
 - export/import contracts for BestQ-A durable memory;
-- visible run timeline across preflight, start, capture, and verify.

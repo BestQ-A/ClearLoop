@@ -98,6 +98,8 @@ The first local format is file-based:
 
 The local backend exposes JSON-RPC `recordRunLedgerResult` for adapters and the VS Code command palette. It updates the same run directory instead of creating a second source of truth.
 
+The VS Code route `/runs` and command `ClearLoop: Open Run Ledger` are a visual reader over the same files. The UI should not infer success from chat output alone; it should surface `manifest.json`, evidence events, command records, verification text, result summary, changed-file counts, and memory-gate state from the ledger directory.
+
 Minimal params:
 
 ```json

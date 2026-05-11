@@ -70,6 +70,14 @@ changes.json contains reported changed_files
 verification.md and result.md are rewritten with the recorded result
 ```
 
+For a minimal visual run-ledger smoke, verify the command palette exposes:
+
+```text
+ClearLoop: Open Run Ledger
+```
+
+The `/runs` route should list directories under `.bestqa/agent-runs/`, read `manifest.json`, `evidence.jsonl`, `commands.jsonl`, `changes.json`, `verification.md`, and `result.md`, and present status, stage, command count, evidence count, verification text, and memory-gate state without creating another source of truth.
+
 For a minimal extension runner smoke, verify the command palette exposes:
 
 ```text

@@ -48,6 +48,10 @@ suite("ClearLoop CLI agent preflight", () => {
       commands.includes("clearLoop.checkCliAgents"),
       "clearLoop.checkCliAgents command should be registered"
     );
+    assert.ok(
+      commands.includes("clearLoop.openRunLedger"),
+      "clearLoop.openRunLedger command should be registered"
+    );
 
     const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "clearloop-vscode-smoke-"));
     const report = await vscode.commands.executeCommand<any>("clearLoop.checkCliAgents", {

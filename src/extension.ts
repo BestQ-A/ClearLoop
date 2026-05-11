@@ -2174,6 +2174,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand("clearLoop.openTaskHistory", () => navigateClearLoop("/history")),
 
+    vscode.commands.registerCommand("clearLoop.openRunLedger", () => navigateClearLoop("/runs")),
+
     vscode.commands.registerCommand("clearLoop.openMemoryReviews", () => navigateClearLoop("/memory-reviews")),
 
     vscode.commands.registerCommand("clearLoop.listMCPServers", () => navigateClearLoop("/mcp")),

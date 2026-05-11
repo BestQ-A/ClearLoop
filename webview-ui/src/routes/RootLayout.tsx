@@ -266,6 +266,10 @@ export default function RootLayout() {
         case "history":
           navigate("/history");
           break;
+        case "runs":
+        case "run-ledger":
+          navigate("/runs");
+          break;
         case "mcp":
           navigate("/mcp");
           break;
@@ -510,6 +514,7 @@ export default function RootLayout() {
           const target = String(data || "");
           if (target === "settings") navigate("/settings/prompt-template");
           else if (target === "history") navigate("/history");
+          else if (target === "runs" || target === "run-ledger") navigate("/runs");
           else if (target === "mcp") navigate("/mcp");
           else if (target === "memory" || target === "memory-reviews") navigate("/memory-reviews");
           else if (target === "notifications") navigate("/notifications");
@@ -587,6 +592,7 @@ export default function RootLayout() {
   const hideBottomInput =
     pathname.startsWith("/settings") ||
     pathname.startsWith("/history") ||
+    pathname.startsWith("/runs") ||
     pathname.startsWith("/mcp") ||
     pathname.startsWith("/memory-reviews") ||
     pathname.startsWith("/notifications") ||
@@ -596,6 +602,7 @@ export default function RootLayout() {
     () => [
       { id: "new-task", label: "New Task", category: "Action", shortcut: "Ctrl+N", action: handleClear },
       { id: "history", label: "Task History", category: "Nav", action: () => navigate("/history") },
+      { id: "runs", label: "Run Ledger", category: "Nav", action: () => navigate("/runs") },
       { id: "mcp", label: "Remote MCP Servers", category: "Nav", action: () => navigate("/mcp") },
       { id: "memory-reviews", label: "Memory Reviews", category: "Nav", action: () => navigate("/memory-reviews") },
       { id: "notifications", label: "Notifications", category: "Nav", action: () => navigate("/notifications") },
